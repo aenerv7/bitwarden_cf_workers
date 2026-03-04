@@ -43,15 +43,33 @@ export const debugMiddleware: MiddlewareHandler<{
 
     // 如果是 POST/PUT，记录请求体摘要
     if (['POST', 'PUT'].includes(method)) {
-        try {
-            const clone = c.req.raw.clone();
-            const body = await clone.json().catch(() => null);
-            if (body) {
-                const sanitized = sanitizeBody(body);
-                console.log(`  Body: ${JSON.stringify(sanitized).slice(0, 200)}`);
+        const contentType = c.req.header('content-type') || '';
+
+        // 处理 form-urlencoded
+        if (contentType.includes('application/x-www-form-urlencoded')) {
+            try {
+                const formData = await c.req.parseBody();
+                const formObj: any = {};
+                for (const [key, value] of Object.entries(formData)) {
+                    formObj[key] = typeof value === 'string' ?
+                        (sensitiveFields.includes(key) ? value.slice(0, 10) + '***' : value) : value;
+                }
+                console.log(`  Body (form): ${JSON.stringify(formObj).slice(0, 300)}`);
+            } catch (e) {
+                console.log(`  Body (form): <parse error: ${e}>`);
             }
-        } catch {
-            // 忽略无法解析的 body
+        } else {
+            // JSON body
+            try {
+                const clone = c.req.raw.clone();
+                const body = await clone.json().catch(() => null);
+                if (body) {
+                    const sanitized = sanitizeBody(body);
+                    console.log(`  Body: ${JSON.stringify(sanitized).slice(0, 200)}`);
+                }
+            } catch {
+                // 忽略无法解析的 body
+            }
         }
     }
 
@@ -66,21 +84,21 @@ export const debugMiddleware: MiddlewareHandler<{
 /**
  * 脱敏请求体中的敏感字段
  */
+const sensitiveFields = [
+    'masterPasswordHash',
+    'masterPassword',
+    'password',
+    'key',
+    'privateKey',
+    'encryptedPrivateKey',
+    'token',
+    'accessToken',
+    'refreshToken',
+    'code',
+];
+
 function sanitizeBody(body: any): any {
     if (typeof body !== 'object' || body === null) return body;
-
-    const sensitiveFields = [
-        'masterPasswordHash',
-        'masterPassword',
-        'password',
-        'key',
-        'privateKey',
-        'encryptedPrivateKey',
-        'token',
-        'accessToken',
-        'refreshToken',
-        'code',
-    ];
 
     const sanitized: any = { ...body };
     for (const field of sensitiveFields) {
@@ -90,24 +108,3 @@ function sanitizeBody(body: any): any {
     }
     return sanitized;
 }
-
-/**
- * 简化日志 - 仅记录关键信息（生产环境可用）
- */
-export const simpleDebugMiddleware: MiddlewareHandler<{
-    Bindings: Bindings;
-    Variables: Variables;
-}> = async (c, next) => {
-    const startTime = Date.now();
-    const method = c.req.method;
-    const path = c.req.path;
-    const requestId = crypto.randomUUID().slice(0, 8);
-
-    console.log(`[${requestId}] ${method} ${path}`);
-
-    await next();
-
-    const duration = Date.now() - startTime;
-    const status = c.res.status;
-    console.log(`[${requestId}] ${status} ${duration}ms`);
-};

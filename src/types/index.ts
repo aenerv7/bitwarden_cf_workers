@@ -25,6 +25,7 @@ export type Variables = {
 export interface JwtPayload {
     sub: string; // user id
     email: string;
+    email_verified: boolean;
     name: string;
     premium: boolean;
     iss: string;

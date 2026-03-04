@@ -399,6 +399,7 @@ async function handlePasswordGrant(c: any, db: any, body: TokenRequest) {
     const accessToken = await signJwt({
         sub: user.id,
         email: user.email,
+        email_verified: !!user.emailVerified,
         name: user.name || '',
         premium: user.premium,
         sstamp: user.securityStamp,
@@ -444,26 +445,26 @@ async function handlePasswordGrant(c: any, db: any, body: TokenRequest) {
         scope: 'api offline_access',
         unofficialServer: false,
         UserDecryptionOptions: {
-            hasMasterPassword: !!user.masterPassword,
+            HasMasterPassword: !!user.masterPassword,
             object: 'userDecryptionOptions',
         },
     };
 
-    // 新版客户端需要 masterPasswordUnlock 字段（在 UserDecryptionOptions 内）
+    // 新版客户端需要 MasterPasswordUnlock 字段（在 UserDecryptionOptions 内）
     if (user.masterPassword && user.key) {
-        response.UserDecryptionOptions.masterPasswordUnlock = {
-            kdf: {
-                kdfType: user.kdf,
-                iterations: user.kdfIterations,
-                memory: user.kdfMemory ?? null,
-                parallelism: user.kdfParallelism ?? null,
+        response.UserDecryptionOptions.MasterPasswordUnlock = {
+            Kdf: {
+                KdfType: user.kdf,
+                Iterations: user.kdfIterations,
+                Memory: user.kdfMemory ?? null,
+                Parallelism: user.kdfParallelism ?? null,
             },
-            masterKeyEncryptedUserKey: user.key,
-            salt: user.email.toLowerCase(),
+            MasterKeyEncryptedUserKey: user.key,
+            Salt: user.email.toLowerCase(),
         };
     }
 
-    console.log(`[TOKEN] Response for user ${user.email}: Kdf=${user.kdf}, KdfIterations=${user.kdfIterations}, HasKey=${!!user.key}, HasMasterPasswordUnlock=${!!response.UserDecryptionOptions.masterPasswordUnlock}`);
+    console.log(`[TOKEN] Response for user ${user.email}: Kdf=${user.kdf}, KdfIterations=${user.kdfIterations}, HasKey=${!!user.key}, HasMasterPasswordUnlock=${!!response.UserDecryptionOptions.MasterPasswordUnlock}`);
 
     return c.json(response);
 }
@@ -503,6 +504,7 @@ async function handleRefreshTokenGrant(c: any, db: any, body: TokenRequest) {
     const accessToken = await signJwt({
         sub: user.id,
         email: user.email,
+        email_verified: !!user.emailVerified,
         name: user.name || '',
         premium: user.premium,
         sstamp: user.securityStamp,
@@ -541,21 +543,21 @@ async function handleRefreshTokenGrant(c: any, db: any, body: TokenRequest) {
         scope: 'api offline_access',
         unofficialServer: false,
         UserDecryptionOptions: {
-            hasMasterPassword: !!user.masterPassword,
+            HasMasterPassword: !!user.masterPassword,
             object: 'userDecryptionOptions',
         },
     };
 
     if (user.masterPassword && user.key) {
-        response.UserDecryptionOptions.masterPasswordUnlock = {
-            kdf: {
-                kdfType: user.kdf,
-                iterations: user.kdfIterations,
-                memory: user.kdfMemory ?? null,
-                parallelism: user.kdfParallelism ?? null,
+        response.UserDecryptionOptions.MasterPasswordUnlock = {
+            Kdf: {
+                KdfType: user.kdf,
+                Iterations: user.kdfIterations,
+                Memory: user.kdfMemory ?? null,
+                Parallelism: user.kdfParallelism ?? null,
             },
-            masterKeyEncryptedUserKey: user.key,
-            salt: user.email.toLowerCase(),
+            MasterKeyEncryptedUserKey: user.key,
+            Salt: user.email.toLowerCase(),
         };
     }
 
