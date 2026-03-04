@@ -6,7 +6,7 @@
 
 import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, inArray } from 'drizzle-orm';
 import { users, ciphers, folders, sends, organizations, organizationUsers, collections, collectionCiphers } from '../db/schema';
 import { authMiddleware } from '../middleware/auth';
 import { NotFoundError } from '../middleware/error';
@@ -57,11 +57,20 @@ sync.get('/', async (c) => {
 
     // 构建 accountKeys
     const accountKeys: AccountKeysResponse | null = (user.publicKey || user.privateKey) ? {
-        accountPublicKey: user.publicKey || null,
-        accountEncryptedPrivateKey: user.privateKey || null,
+        publicKey: user.publicKey || null,
+        encPrivateKey: user.privateKey || null,
         signedPublicKey: user.signedPublicKey || null,
         object: 'accountKeys',
     } : null;
+
+    // 计算 twoFactorEnabled
+    function hasTwoFactor(u: any): boolean {
+        if (!u.twoFactorProviders) return false;
+        try {
+            const p = JSON.parse(u.twoFactorProviders);
+            return Object.values(p).some((v: any) => v.enabled);
+        } catch { return false; }
+    }
 
     // 构建 profile - 对应 ProfileResponseModel
     const profile: ProfileResponse = {
@@ -73,7 +82,7 @@ sync.get('/', async (c) => {
         premiumFromOrganization: false,
         masterPasswordHint: user.masterPasswordHint,
         culture: user.culture,
-        twoFactorEnabled: false,
+        twoFactorEnabled: hasTwoFactor(user),
         key: user.key,
         privateKey: user.privateKey,
         accountKeys,
@@ -88,6 +97,19 @@ sync.get('/', async (c) => {
         providers: [],
         providerOrganizations: [],
     };
+
+    // 查询个人 ciphers 的 collectionIds（个人 cipher 通常无 collection，但确保正确）
+    const personalCipherIds = userCiphers.map(c => c.id);
+    const personalCipherCollectionMap: Record<string, string[]> = {};
+    if (personalCipherIds.length > 0) {
+        const personalCipherCollections = await db.select().from(collectionCiphers)
+            .where(inArray(collectionCiphers.cipherId, personalCipherIds))
+            .all();
+        for (const cc of personalCipherCollections) {
+            if (!personalCipherCollectionMap[cc.cipherId]) personalCipherCollectionMap[cc.cipherId] = [];
+            personalCipherCollectionMap[cc.cipherId].push(cc.collectionId);
+        }
+    }
 
     // 构建 ciphers 响应 - 对应 CipherDetailsResponseModel
     const cipherResponses = userCiphers.map((cipher) => {
@@ -120,7 +142,7 @@ sync.get('/', async (c) => {
             archivedDate: null,
             key: cipher.key,
             object: 'cipherDetails',
-            collectionIds: [],
+            collectionIds: personalCipherCollectionMap[cipher.id] || [],
             edit: true,
             viewPassword: true,
             permissions: {
@@ -184,11 +206,14 @@ sync.get('/', async (c) => {
     // 如果用户有组织，获取 Collections 和所有相关的 Ciphers
     const myCollections: any[] = [];
     const orgCiphersData: any[] = [];
+    // 记录每个 cipher 对应的 collectionIds
+    const cipherCollectionMap: Record<string, string[]> = {};
     const orgIds = orgsData.map(o => o.org.id);
 
     if (orgIds.length > 0) {
+        // 支持多组织：用 inArray 查询所有组织的 collections
         const orgCollections = await db.select().from(collections)
-            .where(eq(collections.organizationId, orgIds[0])) // Assuming one org for simplicity, adjust for multiple
+            .where(inArray(collections.organizationId, orgIds))
             .all();
 
         for (const col of orgCollections) {
@@ -206,15 +231,15 @@ sync.get('/', async (c) => {
 
             const cipherIdsInCollection = collectionCipherRelations.map(cc => cc.cipherId);
 
+            // 记录 cipher -> collectionIds 映射
+            for (const cipherId of cipherIdsInCollection) {
+                if (!cipherCollectionMap[cipherId]) cipherCollectionMap[cipherId] = [];
+                cipherCollectionMap[cipherId].push(col.id);
+            }
+
             if (cipherIdsInCollection.length > 0) {
-                // Simplified, should be `inArray` for proper implementation but we just take one for now to keep it compiling
-                // or just import an inArray and use it. Let's use inArray!
-                // Wait, inArray needs importing. I will just do it simply.
                 const ciphersInCollection = await db.select().from(ciphers)
-                    .where(and(
-                        eq(ciphers.organizationId, col.organizationId),
-                        eq(ciphers.id, cipherIdsInCollection[0])
-                    ))
+                    .where(inArray(ciphers.id, cipherIdsInCollection))
                     .all();
                 orgCiphersData.push(...ciphersInCollection);
             }
@@ -262,7 +287,7 @@ sync.get('/', async (c) => {
             archivedDate: null,
             key: cipher.key,
             object: 'cipherDetails',
-            collectionIds: [], // TODO: Populate this based on collectionCiphers
+            collectionIds: cipherCollectionMap[cipher.id] || [],
             edit: true,
             viewPassword: true,
             permissions: {

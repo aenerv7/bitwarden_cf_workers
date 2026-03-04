@@ -6,7 +6,7 @@
 
 import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
-import { eq, and, desc, isNull } from 'drizzle-orm';
+import { eq, and, desc, isNull, isNotNull } from 'drizzle-orm';
 import { users, ciphers, folders, collectionCiphers, events } from '../db/schema';
 import { authMiddleware } from '../middleware/auth';
 import { logEvent } from '../services/events';
@@ -22,8 +22,9 @@ ciphersRoute.use('/*', authMiddleware);
 
 /**
  * 将数据库记录转换为 Bitwarden API 响应格式
+ * objectType: "cipher" 用于单个 CRUD 端点, "cipherDetails" 用于列表/sync
  */
-function toCipherResponse(cipher: any, userId: string): CipherResponse {
+function toCipherResponse(cipher: any, userId: string, objectType: 'cipher' | 'cipherDetails' = 'cipher'): CipherResponse {
     const data = JSON.parse(cipher.data || '{}');
     const favorites = cipher.favorites ? JSON.parse(cipher.favorites) : {};
     const folders = cipher.folders ? JSON.parse(cipher.folders) : {};
@@ -68,7 +69,7 @@ function toCipherResponse(cipher: any, userId: string): CipherResponse {
         deletedDate: cipher.deletedDate,
         archivedDate: null, // 归档日期 - CipherResponseModel
         key: cipher.key,
-        object: 'cipherDetails', // 官方 Sync 使用 cipherDetails
+        object: objectType,
         collectionIds: [], // 个人 cipher 无 collection
         edit: true,
         viewPassword: true,
@@ -93,7 +94,7 @@ ciphersRoute.get('/', async (c) => {
     const results = await db.select().from(ciphers)
         .where(and(eq(ciphers.userId, userId), isNull(ciphers.deletedDate))).all();
 
-    const data = results.map((cipher) => toCipherResponse(cipher, userId));
+    const data = results.map((cipher) => toCipherResponse(cipher, userId, 'cipherDetails'));
 
     return c.json({
         data,
@@ -555,7 +556,7 @@ ciphersRoute.delete('/:id', async (c) => {
 
     await logEvent(c.env.DB, 1115, { userId, cipherId });
 
-    return c.json(null, 200);
+    return c.body(null, 204);
 });
 
 /**
@@ -577,7 +578,7 @@ ciphersRoute.put('/:id/delete', async (c) => {
 
     await logEvent(c.env.DB, 1115, { userId, cipherId });
 
-    return c.json(null, 200);
+    return c.body(null, 204);
 });
 
 /**
@@ -670,11 +671,10 @@ ciphersRoute.post('/purge', async (c) => {
     const valid = await verifyPassword(body.masterPasswordHash, user.masterPassword || '');
     if (!valid) throw new BadRequestError('Invalid master password.');
 
-    // 永久删除所有已软删除的 ciphers
+    // 永久删除所有已软删除（在回收站）的 ciphers
     const softDeleted = await db.select({ id: ciphers.id }).from(ciphers)
-        .where(and(eq(ciphers.userId, userId))).all();
+        .where(and(eq(ciphers.userId, userId), isNotNull(ciphers.deletedDate))).all();
 
-    // 简化：删除所有该用户的 ciphers
     for (const cipher of softDeleted) {
         await db.delete(ciphers).where(eq(ciphers.id, cipher.id));
     }
@@ -682,7 +682,7 @@ ciphersRoute.post('/purge', async (c) => {
     const now = new Date().toISOString();
     await db.update(users).set({ accountRevisionDate: now }).where(eq(users.id, userId));
 
-    return c.json(null, 200);
+    return c.body(null, 204);
 });
 
 export default ciphersRoute;

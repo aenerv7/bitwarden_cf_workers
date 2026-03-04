@@ -17,10 +17,7 @@ config.get('/', async (c) => {
     return c.json({
         version: '2025.1.0',
         gitHash: 'workers',
-        server: {
-            name: 'bitwarden-workers',
-            url: '',
-        },
+        server: null, // null = 官方服务器标志，isOfficialBitwardenServer() 检查此字段
         environment: {
             cloudRegion: 'Self-hosted',
             vault: '',

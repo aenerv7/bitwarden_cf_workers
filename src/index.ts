@@ -27,6 +27,7 @@ import collectionsRoutes from './routes/collections';
 import eventsRoutes from './routes/events';
 import syncRoutes from './routes/sync';
 import configRoutes from './routes/config';
+import devicesRoutes from './routes/devices';
 import type { Bindings, Variables } from './types';
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
@@ -62,6 +63,7 @@ app.route('/api/collections', collectionsRoutes);
 app.route('/api/events', eventsRoutes);
 app.route('/api/sync', syncRoutes);
 app.route('/api/config', configRoutes);
+app.route('/api/devices', devicesRoutes);
 
 // 404 处理
 app.notFound((c) => {

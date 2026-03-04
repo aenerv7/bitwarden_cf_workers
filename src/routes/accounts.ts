@@ -69,6 +69,16 @@ accounts.use('/*', authMiddleware);
 /**
  * 构建 ProfileResponse - 对应 ProfileResponseModel.cs
  */
+function hasTwoFactorEnabled(user: any): boolean {
+    if (!user.twoFactorProviders) return false;
+    try {
+        const providers = JSON.parse(user.twoFactorProviders);
+        return Object.values(providers).some((p: any) => p.enabled);
+    } catch {
+        return false;
+    }
+}
+
 function toProfileResponse(user: any): ProfileResponse {
     return {
         id: user.id,
@@ -79,7 +89,7 @@ function toProfileResponse(user: any): ProfileResponse {
         premiumFromOrganization: false, // 个人用户无组织 premium
         masterPasswordHint: user.masterPasswordHint,
         culture: user.culture,
-        twoFactorEnabled: false,
+        twoFactorEnabled: hasTwoFactorEnabled(user),
         key: user.key,
         privateKey: user.privateKey,
         accountKeys: buildAccountKeys(user),
@@ -99,8 +109,8 @@ function toProfileResponse(user: any): ProfileResponse {
 function buildAccountKeys(user: any): AccountKeysResponse | null {
     if (!user.publicKey && !user.privateKey) return null;
     return {
-        accountPublicKey: user.publicKey || null,
-        accountEncryptedPrivateKey: user.privateKey || null,
+        publicKey: user.publicKey || null,
+        encPrivateKey: user.privateKey || null,
         signedPublicKey: user.signedPublicKey || null,
         object: 'accountKeys',
     };
@@ -315,7 +325,7 @@ accounts.post('/password', async (c) => {
         lastPasswordChangeDate: now,
     }).where(eq(users.id, userId));
 
-    return c.json(null, 200);
+    return c.body(null, 204);
 });
 
 /**
@@ -323,10 +333,153 @@ accounts.post('/password', async (c) => {
  * 对应 AccountsController.PostPasswordHint
  */
 accounts.post('/password-hint', async (c) => {
-    const body = await c.req.json<{ email: string }>();
-
     // 安全考虑：不管邮箱是否存在都返回 200
     return c.json(null, 200);
+});
+
+/**
+ * PUT /api/accounts/avatar
+ * 对应 AccountsController.PutAvatar
+ */
+accounts.put('/avatar', async (c) => {
+    const db = drizzle(c.env.DB);
+    const userId = c.get('userId');
+    const body = await c.req.json<{ avatarColor?: string | null }>();
+
+    const now = new Date().toISOString();
+    await db.update(users).set({
+        avatarColor: body.avatarColor ?? null,
+        revisionDate: now,
+        accountRevisionDate: now,
+    }).where(eq(users.id, userId));
+
+    const updated = await db.select().from(users).where(eq(users.id, userId)).get();
+    if (!updated) throw new NotFoundError('User not found.');
+    return c.json(toProfileResponse(updated));
+});
+
+/**
+ * POST /api/accounts/verify-password
+ * 对应 AccountsController.PostVerifyPassword
+ */
+accounts.post('/verify-password', async (c) => {
+    const db = drizzle(c.env.DB);
+    const userId = c.get('userId');
+    const body = await c.req.json<{ masterPasswordHash: string }>();
+
+    const user = await db.select().from(users).where(eq(users.id, userId)).get();
+    if (!user) throw new NotFoundError('User not found.');
+
+    const valid = await verifyPassword(body.masterPasswordHash, user.masterPassword || '');
+    if (!valid) throw new BadRequestError('Invalid master password.');
+
+    return c.json({ masterPasswordPolicy: null });
+});
+
+/**
+ * POST /api/accounts/security-stamp
+ * 对应 AccountsController.PostSecurityStamp - 刷新安全戳（使所有 token 失效）
+ */
+accounts.post('/security-stamp', async (c) => {
+    const db = drizzle(c.env.DB);
+    const userId = c.get('userId');
+    const body = await c.req.json<{ masterPasswordHash: string }>().catch(() => ({ masterPasswordHash: '' }));
+
+    const user = await db.select().from(users).where(eq(users.id, userId)).get();
+    if (!user) throw new NotFoundError('User not found.');
+
+    if (body.masterPasswordHash) {
+        const valid = await verifyPassword(body.masterPasswordHash, user.masterPassword || '');
+        if (!valid) throw new BadRequestError('Invalid master password.');
+    }
+
+    const now = new Date().toISOString();
+    await db.update(users).set({
+        securityStamp: generateSecureRandomString(50),
+        revisionDate: now,
+        accountRevisionDate: now,
+    }).where(eq(users.id, userId));
+
+    return c.body(null, 204);
+});
+
+/**
+ * POST /api/accounts/email-token
+ * 发送邮箱变更验证码（stub - 不真正发邮件，直接返回成功）
+ */
+accounts.post('/email-token', async (c) => {
+    const db = drizzle(c.env.DB);
+    const userId = c.get('userId');
+    const body = await c.req.json<{ masterPasswordHash: string; newEmail: string }>();
+
+    const user = await db.select().from(users).where(eq(users.id, userId)).get();
+    if (!user) throw new NotFoundError('User not found.');
+
+    const valid = await verifyPassword(body.masterPasswordHash, user.masterPassword || '');
+    if (!valid) throw new BadRequestError('Invalid master password.');
+
+    return c.body(null, 204);
+});
+
+/**
+ * PUT /api/accounts/email
+ * 对应 AccountsController.PutEmail - 更新邮箱地址
+ */
+accounts.put('/email', async (c) => {
+    const db = drizzle(c.env.DB);
+    const userId = c.get('userId');
+    const body = await c.req.json<{
+        masterPasswordHash: string;
+        newEmail: string;
+        newMasterPasswordHash: string;
+        token: string;
+        key: string;
+    }>();
+
+    const user = await db.select().from(users).where(eq(users.id, userId)).get();
+    if (!user) throw new NotFoundError('User not found.');
+
+    const valid = await verifyPassword(body.masterPasswordHash, user.masterPassword || '');
+    if (!valid) throw new BadRequestError('Invalid master password.');
+
+    const newEmail = body.newEmail.toLowerCase().trim();
+    const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, newEmail)).get();
+    if (existing && existing.id !== userId) throw new BadRequestError('Email already taken.');
+
+    const now = new Date().toISOString();
+    await db.update(users).set({
+        email: newEmail,
+        masterPassword: body.newMasterPasswordHash || user.masterPassword,
+        key: body.key || user.key,
+        securityStamp: generateSecureRandomString(50),
+        revisionDate: now,
+        accountRevisionDate: now,
+        lastEmailChangeDate: now,
+    }).where(eq(users.id, userId));
+
+    return c.body(null, 204);
+});
+
+/**
+ * DELETE /api/accounts
+ * 对应 AccountsController.Delete - 删除账户
+ */
+accounts.delete('/', async (c) => {
+    const db = drizzle(c.env.DB);
+    const userId = c.get('userId');
+    const body = await c.req.json<{ masterPasswordHash: string }>().catch(() => ({ masterPasswordHash: '' }));
+
+    const user = await db.select().from(users).where(eq(users.id, userId)).get();
+    if (!user) throw new NotFoundError('User not found.');
+
+    if (body.masterPasswordHash) {
+        const valid = await verifyPassword(body.masterPasswordHash, user.masterPassword || '');
+        if (!valid) throw new BadRequestError('Invalid master password.');
+    }
+
+    await db.delete(users).where(eq(users.id, userId));
+
+    return c.body(null, 204);
 });
 
 export default accounts;

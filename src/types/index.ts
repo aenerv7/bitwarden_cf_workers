@@ -203,8 +203,8 @@ export interface ProfileResponse {
 }
 
 export interface AccountKeysResponse {
-    accountPublicKey: string | null;
-    accountEncryptedPrivateKey: string | null;
+    publicKey: string | null;
+    encPrivateKey: string | null;
     signedPublicKey: string | null;
     object: string;
 }

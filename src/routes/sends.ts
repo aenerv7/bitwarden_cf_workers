@@ -273,7 +273,7 @@ authed.delete('/:id', async (c) => {
     await db.delete(sends).where(eq(sends.id, sendId));
     const now = new Date().toISOString();
     await db.update(users).set({ accountRevisionDate: now }).where(eq(users.id, userId));
-    return c.json(null, 200);
+    return c.body(null, 204);
 });
 
 // 挂载认证路由（在公开路由之后）

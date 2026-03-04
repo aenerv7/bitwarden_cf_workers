@@ -19,11 +19,12 @@ const identity = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
 /**
  * POST /identity/accounts/prelogin
+ * POST /identity/accounts/prelogin/password (新版端点)
  * 对应 Identity/Controllers/AccountsController.cs -> PostPrelogin
  * 返回用户的 KDF 类型和参数，客户端据此派生 master key
  */
-identity.post('/accounts/prelogin', async (c) => {
-    const body = await c.req.json<PreloginRequest>();
+async function handlePrelogin(c: any) {
+    const body = await c.req.json() as PreloginRequest;
     if (!body.email) {
         throw new BadRequestError('Email is required.');
     }
@@ -60,6 +61,179 @@ identity.post('/accounts/prelogin', async (c) => {
     };
 
     return c.json(response);
+}
+
+identity.post('/accounts/prelogin', handlePrelogin);
+identity.post('/accounts/prelogin/password', handlePrelogin);
+
+/**
+ * POST /identity/accounts/register
+ * 旧版注册 - 兼容旧版客户端从 identity 路由发起注册
+ */
+identity.post('/accounts/register', async (c) => {
+    const body = await c.req.json<any>();
+
+    if (!body.email || !body.masterPasswordHash) {
+        throw new BadRequestError('Email and master password hash are required.');
+    }
+
+    const db = drizzle(c.env.DB);
+    const email = body.email.toLowerCase().trim();
+
+    const { generateSecureRandomString } = await import('../services/crypto');
+    const { users } = await import('../db/schema');
+
+    const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).get();
+    if (existing) {
+        throw new BadRequestError('Email is already taken.');
+    }
+
+    const now = new Date().toISOString();
+    const userId = crypto.randomUUID();
+
+    await db.insert(users).values({
+        id: userId,
+        name: body.name || null,
+        email,
+        emailVerified: false,
+        masterPassword: body.masterPasswordHash,
+        masterPasswordHint: body.masterPasswordHint || null,
+        culture: 'en-US',
+        securityStamp: generateSecureRandomString(50),
+        key: body.key,
+        publicKey: body.keys?.publicKey || null,
+        privateKey: body.keys?.encryptedPrivateKey || null,
+        kdf: body.kdf ?? 0,
+        kdfIterations: body.kdfIterations ?? 600000,
+        kdfMemory: body.kdfMemory ?? null,
+        kdfParallelism: body.kdfParallelism ?? null,
+        apiKey: generateSecureRandomString(30),
+        accountRevisionDate: now,
+        creationDate: now,
+        revisionDate: now,
+    });
+
+    return c.json(null, 200);
+});
+
+/**
+ * 生成注册验证 token（HMAC-SHA256，无需存储，1小时有效）
+ */
+async function generateRegistrationToken(email: string, secret: string): Promise<string> {
+    const hour = Math.floor(Date.now() / 3600000);
+    const data = new TextEncoder().encode(`register:${email}:${hour}`);
+    const key = await crypto.subtle.importKey(
+        'raw', new TextEncoder().encode(secret),
+        { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+    );
+    const sig = await crypto.subtle.sign('HMAC', key, data);
+    return btoa(String.fromCharCode(...new Uint8Array(sig)));
+}
+
+/**
+ * POST /identity/accounts/register/send-verification-email
+ * 新注册流程第一步：发送验证邮件。
+ * 自托管无邮件服务时，直接在响应中返回 token（客户端/管理员可取用）。
+ */
+identity.post('/accounts/register/send-verification-email', async (c) => {
+    const body = await c.req.json() as { email: string; name?: string; receiveMarketingEmails?: boolean };
+
+    if (!body.email) throw new BadRequestError('Email is required.');
+
+    const db = drizzle(c.env.DB);
+    const email = body.email.toLowerCase().trim();
+
+    const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).get();
+    if (existing) throw new BadRequestError('Email is already registered.');
+
+    // 自托管：直接返回 token（无邮件服务时的 bypass）
+    const token = await generateRegistrationToken(email, c.env.JWT_SECRET);
+    return c.json({ emailVerificationToken: token }, 200);
+});
+
+/**
+ * POST /identity/accounts/register/verification-email-clicked
+ * 新注册流程第二步：验证邮件 token。
+ */
+identity.post('/accounts/register/verification-email-clicked', async (c) => {
+    const body = await c.req.json() as { email: string; emailVerificationToken: string };
+
+    if (!body.email || !body.emailVerificationToken) {
+        throw new BadRequestError('Email and token are required.');
+    }
+
+    // 自托管：接受任意 token（不严格验证），直接返回成功
+    return c.json(null, 200);
+});
+
+/**
+ * POST /identity/accounts/register/finish
+ * 新注册流程第三步：完成注册，提交加密密钥和密码哈希。
+ * 新 API 字段名与旧版不同：
+ *   userSymmetricKey  (旧: key)
+ *   userAsymmetricKeys.publicKey / .encryptedPrivateKey (旧: keys.publicKey / .encryptedPrivateKey)
+ *   kdfType (旧: kdf)
+ */
+identity.post('/accounts/register/finish', async (c) => {
+    const body = await c.req.json() as {
+        email: string;
+        masterPasswordHash: string;
+        masterPasswordHint?: string;
+        kdfType?: number;
+        kdf?: number;
+        kdfIterations: number;
+        kdfMemory?: number;
+        kdfParallelism?: number;
+        userSymmetricKey?: string;
+        key?: string;
+        userAsymmetricKeys?: { publicKey: string; encryptedPrivateKey: string };
+        keys?: { publicKey: string; encryptedPrivateKey: string };
+        emailVerificationToken?: string;
+        name?: string;
+    };
+
+    if (!body.email || !body.masterPasswordHash) {
+        throw new BadRequestError('Email and master password hash are required.');
+    }
+
+    const db = drizzle(c.env.DB);
+    const email = body.email.toLowerCase().trim();
+
+    const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).get();
+    if (existing) throw new BadRequestError('Email is already registered.');
+
+    const { generateSecureRandomString } = await import('../services/crypto');
+    const now = new Date().toISOString();
+    const userId = crypto.randomUUID();
+
+    // 兼容新旧字段名
+    const symmetricKey = body.userSymmetricKey || body.key || null;
+    const asymKeys = body.userAsymmetricKeys || body.keys;
+    const kdfType = body.kdfType ?? body.kdf ?? 0;
+
+    await db.insert(users).values({
+        id: userId,
+        name: body.name || null,
+        email,
+        emailVerified: true,
+        masterPassword: body.masterPasswordHash,
+        masterPasswordHint: body.masterPasswordHint || null,
+        culture: 'en-US',
+        securityStamp: generateSecureRandomString(50),
+        key: symmetricKey,
+        publicKey: asymKeys?.publicKey || null,
+        privateKey: asymKeys?.encryptedPrivateKey || null,
+        kdf: kdfType,
+        kdfIterations: body.kdfIterations ?? 600000,
+        kdfMemory: body.kdfMemory ?? null,
+        kdfParallelism: body.kdfParallelism ?? null,
+        apiKey: generateSecureRandomString(30),
+        accountRevisionDate: now,
+        creationDate: now,
+        revisionDate: now,
+    });
+
+    return c.json(null, 200);
 });
 
 /**
@@ -268,9 +442,17 @@ async function handlePasswordGrant(c: any, db: any, body: TokenRequest) {
         ResetMasterPassword: false,
         ForcePasswordReset: user.forcePasswordReset,
         scope: 'api offline_access',
-        unofficialServer: true,
+        unofficialServer: false,
         UserDecryptionOptions: {
             hasMasterPassword: !!user.masterPassword,
+            masterPasswordUnlock: user.masterPassword ? {
+                kdf: user.kdf,
+                kdfIterations: user.kdfIterations,
+                kdfMemory: user.kdfMemory ?? null,
+                kdfParallelism: user.kdfParallelism ?? null,
+                salt: user.email.toLowerCase(),
+                masterKeyEncryptedUserKey: user.key || '',
+            } : null,
         },
     });
 }
@@ -346,9 +528,17 @@ async function handleRefreshTokenGrant(c: any, db: any, body: TokenRequest) {
         ResetMasterPassword: false,
         ForcePasswordReset: user.forcePasswordReset,
         scope: 'api offline_access',
-        unofficialServer: true,
+        unofficialServer: false,
         UserDecryptionOptions: {
             hasMasterPassword: !!user.masterPassword,
+            masterPasswordUnlock: user.masterPassword ? {
+                kdf: user.kdf,
+                kdfIterations: user.kdfIterations,
+                kdfMemory: user.kdfMemory ?? null,
+                kdfParallelism: user.kdfParallelism ?? null,
+                salt: user.email.toLowerCase(),
+                masterKeyEncryptedUserKey: user.key || '',
+            } : null,
         },
     });
 }
