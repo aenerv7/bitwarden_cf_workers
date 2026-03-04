@@ -199,8 +199,126 @@ const uploadAttachmentHandler = async (c: any) => {
 };
 
 ciphersRoute.post('/:id/attachment', uploadAttachmentHandler);
-ciphersRoute.post('/:id/attachment-v2', uploadAttachmentHandler);
 ciphersRoute.post('/:id/attachment-admin', uploadAttachmentHandler);
+
+/**
+ * POST /api/ciphers/:id/attachment/v2
+ * 对应 CiphersController.PostAttachment (v2 延迟上传流程)
+ * 第一步：客户端发送附件元数据，服务端返回 attachmentId 和上传 URL
+ * 第二步：客户端通过 POST /:id/attachment/:attachmentId 上传实际文件
+ */
+ciphersRoute.post('/:id/attachment/v2', async (c) => {
+    const db = drizzle(c.env.DB);
+    const userId = c.get('userId');
+    const cipherId = c.req.param('id');
+
+    const cipher = await db.select().from(ciphers).where(eq(ciphers.id, cipherId)).get();
+    if (!cipher) throw new NotFoundError('Cipher not found');
+    if (cipher.userId !== userId && !cipher.organizationId) {
+        throw new NotFoundError('Cipher not found');
+    }
+
+    const body = await c.req.json<{
+        key?: string;
+        fileName?: string;
+        fileSize?: number;
+        adminRequest?: boolean;
+    }>();
+
+    const attachmentId = generateUuid();
+
+    // 预创建附件元数据（validated=false，等待实际文件上传）
+    const attachmentsMap = cipher.attachments ? JSON.parse(cipher.attachments) : {};
+    attachmentsMap[attachmentId] = {
+        fileName: body.fileName || 'file',
+        key: body.key || '',
+        size: (body.fileSize || 0).toString(),
+        validated: false,
+    };
+
+    const now = new Date().toISOString();
+    await db.update(ciphers).set({
+        attachments: JSON.stringify(attachmentsMap),
+        revisionDate: now,
+    }).where(eq(ciphers.id, cipherId));
+
+    await db.update(users).set({ accountRevisionDate: now }).where(eq(users.id, userId));
+
+    const updated = await db.select().from(ciphers).where(eq(ciphers.id, cipherId)).get();
+
+    return c.json({
+        attachmentId,
+        url: `/api/ciphers/${cipherId}/attachment/${attachmentId}`,
+        fileUploadType: 0, // Direct
+        cipherResponse: toCipherResponse(updated!, userId),
+        cipherMiniResponse: null,
+        object: 'attachment-fileUpload',
+    });
+});
+
+/**
+ * POST /api/ciphers/:id/attachment/:attachmentId
+ * v2 第二步：上传实际文件到已创建的 attachment
+ */
+ciphersRoute.post('/:id/attachment/:attachmentId', async (c) => {
+    const db = drizzle(c.env.DB);
+    const userId = c.get('userId');
+    const cipherId = c.req.param('id');
+    const attachmentId = c.req.param('attachmentId');
+
+    const cipher = await db.select().from(ciphers).where(eq(ciphers.id, cipherId)).get();
+    if (!cipher) throw new NotFoundError('Cipher not found');
+    if (cipher.userId !== userId && !cipher.organizationId) {
+        throw new NotFoundError('Cipher not found');
+    }
+
+    const attachmentsMap = cipher.attachments ? JSON.parse(cipher.attachments) : {};
+    if (!attachmentsMap[attachmentId]) {
+        throw new NotFoundError('Attachment not found.');
+    }
+
+    const body = await c.req.parseBody();
+    const file = body['data'] as File;
+    if (!file) {
+        throw new BadRequestError('File data is required.');
+    }
+
+    // 上传到 R2
+    const r2Key = `${cipherId}/${attachmentId}`;
+    await c.env.ATTACHMENTS.put(r2Key, file.stream(), {
+        httpMetadata: { contentType: file.type }
+    });
+
+    // 更新元数据：标记已验证，更新实际文件大小
+    attachmentsMap[attachmentId].size = file.size.toString();
+    attachmentsMap[attachmentId].validated = true;
+
+    const now = new Date().toISOString();
+    await db.update(ciphers).set({
+        attachments: JSON.stringify(attachmentsMap),
+        revisionDate: now,
+    }).where(eq(ciphers.id, cipherId));
+
+    await logEvent(c.env.DB, 1103, { userId, cipherId });
+
+    return c.json(null, 200);
+});
+
+/**
+ * GET /api/ciphers/:id/attachment/:attachmentId/renew
+ * 对应 CiphersController.RenewFileUploadUrl - 续期上传 URL
+ */
+ciphersRoute.get('/:id/attachment/:attachmentId/renew', async (c) => {
+    const userId = c.get('userId');
+    const cipherId = c.req.param('id');
+    const attachmentId = c.req.param('attachmentId');
+
+    return c.json({
+        url: `/api/ciphers/${cipherId}/attachment/${attachmentId}`,
+        fileUploadType: 0, // Direct
+        object: 'attachment-fileUpload',
+    });
+});
 
 /**
  * GET /api/ciphers/:id/attachment/:attachmentId
