@@ -313,8 +313,8 @@ sync.get('/', async (c) => {
     const formattedFolders = folderResponses; // Renamed for consistency
     const formattedSends = activeSends.map((send): SendResponse => {
         const data = send.data ? JSON.parse(send.data) : null;
-        let authType = 0;
-        if (send.hideEmail && (send as any).emails) authType = 2;
+        let authType = 2;
+        if (send.hideEmail && (send as any).emails) authType = 0;
         if (send.password) authType = 1;
 
         const baseResponse: any = {
@@ -338,9 +338,10 @@ sync.get('/', async (c) => {
         };
 
         if (send.type === 0) {
+            const textObj = typeof data?.text === 'object' ? data.text : undefined;
             baseResponse.text = {
-                text: data?.text || null,
-                hidden: data?.hidden || false
+                text: textObj?.text ?? data?.text ?? '',
+                hidden: textObj?.hidden ?? data?.hidden ?? false
             };
         } else if (send.type === 1) {
             baseResponse.file = {

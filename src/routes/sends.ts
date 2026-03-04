@@ -19,9 +19,9 @@ function toSendResponse(send: any): SendResponse {
     const data = send.data ? JSON.parse(send.data) : null;
 
     // AuthType 推断逻辑 (参照 Bitwarden Core)
-    // 0: None, 1: Password, 2: Email
-    let authType = 0;
-    if (send.hideEmail && (send as any).emails) authType = 2; // Approximation, since we only use password
+    // 0: Email, 1: Password, 2: None
+    let authType = 2;
+    if (send.hideEmail && (send as any).emails) authType = 0; // Approximation, since we only use password
     if (send.password) authType = 1;
 
     const baseResponse: any = {
@@ -30,9 +30,9 @@ function toSendResponse(send: any): SendResponse {
         userId: send.userId,
         type: send.type as SendType,
         authType,
-        name: data?.name || null,
+        name: data?.name || '',
         notes: data?.notes || null,
-        key: send.key,
+        key: send.key || '',
         maxAccessCount: send.maxAccessCount,
         accessCount: send.accessCount,
         revisionDate: send.revisionDate,
@@ -45,14 +45,15 @@ function toSendResponse(send: any): SendResponse {
     };
 
     if (send.type === 0) { // Text
+        const textObj = typeof data?.text === 'object' ? data.text : undefined;
         baseResponse.text = {
-            text: data?.text || null,
-            hidden: data?.hidden || false
+            text: textObj?.text ?? data?.text ?? '',
+            hidden: textObj?.hidden ?? data?.hidden ?? false
         };
     } else if (send.type === 1) { // File
         baseResponse.file = {
             id: data?.id || null, // we don't store distinct file id usually unless from client
-            fileName: data?.file?.fileName || null,
+            fileName: data?.file?.fileName || '',
             size: data?.file?.size || null,
             sizeName: data?.file?.sizeName || null,
         };
@@ -107,21 +108,22 @@ sendsRoute.post('/access/:id', async (c) => {
     const response: SendAccessResponse = {
         id: send.id,
         type: send.type as SendType,
-        name: data?.name || null,
-        key: send.key,
+        name: data?.name || '',
+        key: send.key || '',
         expirationDate: send.expirationDate,
         object: 'send-access',
     };
 
     if (send.type === 0) { // Text
+        const textObj = typeof data?.text === 'object' ? data.text : undefined;
         response.text = {
-            text: data?.text || null,
-            hidden: data?.hidden || false
+            text: textObj?.text ?? data?.text ?? '',
+            hidden: textObj?.hidden ?? data?.hidden ?? false
         };
     } else if (send.type === 1) { // File
         response.file = {
             id: data?.id || null,
-            fileName: data?.file?.fileName || null,
+            fileName: data?.file?.fileName || '',
             size: data?.file?.size || null,
             sizeName: data?.file?.sizeName || null,
         };
