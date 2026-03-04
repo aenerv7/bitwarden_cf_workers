@@ -18,6 +18,7 @@ export type Variables = {
     userId: string;
     email: string;
     jwtPayload: JwtPayload;
+    requestId: string;
 };
 
 // JWT Payload

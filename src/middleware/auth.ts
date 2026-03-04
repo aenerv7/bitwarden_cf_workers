@@ -76,6 +76,8 @@ export const authMiddleware: MiddlewareHandler<{
 }> = async (c, next) => {
     const authHeader = c.req.header('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {
+        const requestId = c.get('requestId') || 'unknown';
+        console.log(`[AUTH ${requestId}] No auth header or invalid format`);
         return c.json({ message: 'Unauthorized' }, 401);
     }
 
@@ -83,12 +85,17 @@ export const authMiddleware: MiddlewareHandler<{
     const payload = await verifyJwt(token, c.env.JWT_SECRET);
 
     if (!payload) {
+        const requestId = c.get('requestId') || 'unknown';
+        console.log(`[AUTH ${requestId}] Invalid or expired token`);
         return c.json({ message: 'Unauthorized' }, 401);
     }
 
     c.set('userId', payload.sub);
     c.set('email', payload.email);
     c.set('jwtPayload', payload);
+
+    const requestId = c.get('requestId') || 'unknown';
+    console.log(`[AUTH ${requestId}] User: ${payload.email} (${payload.sub})`);
 
     await next();
 };

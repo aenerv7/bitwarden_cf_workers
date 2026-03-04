@@ -16,6 +16,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { errorHandler } from './middleware/error';
+import { debugMiddleware } from './middleware/debug';
 import identityRoutes from './routes/identity';
 import accountsRoutes from './routes/accounts';
 import ciphersRoutes from './routes/ciphers';
@@ -40,6 +41,7 @@ app.use('*', cors({
     exposeHeaders: ['Content-Length'],
     maxAge: 86400,
 }));
+app.use('*', debugMiddleware);
 app.use('*', logger());
 app.use('*', errorHandler);
 
