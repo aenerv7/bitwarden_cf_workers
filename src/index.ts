@@ -67,6 +67,26 @@ app.route('/api/sync', syncRoutes);
 app.route('/api/config', configRoutes);
 app.route('/api/devices', devicesRoutes);
 
+// 附件文件下载（公开端点，无需 auth - 客户端通过 apiUnauthenticatedService 下载）
+app.get('/attachments/:cipherId/:attachmentId', async (c) => {
+    const cipherId = c.req.param('cipherId');
+    const attachmentId = c.req.param('attachmentId');
+    const r2Key = `${cipherId}/${attachmentId}`;
+    const file = await c.env.ATTACHMENTS.get(r2Key);
+
+    if (!file) {
+        return c.json({ message: 'File not found.', object: 'error' }, 404);
+    }
+
+    const headers = new Headers();
+    if (file.httpMetadata?.contentType) {
+        headers.set('Content-Type', file.httpMetadata.contentType);
+    }
+    headers.set('Cache-Control', 'public, max-age=31536000');
+
+    return new Response(file.body, { headers });
+});
+
 // 404 处理
 app.notFound((c) => {
     return c.json({ message: 'Not Found', object: 'error' }, 404);

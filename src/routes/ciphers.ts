@@ -322,7 +322,8 @@ ciphersRoute.get('/:id/attachment/:attachmentId/renew', async (c) => {
 
 /**
  * GET /api/ciphers/:id/attachment/:attachmentId
- * 下载附件
+ * 对应 CiphersController.GetAttachmentData
+ * 返回附件下载 URL（iOS 客户端用此 URL 再请求实际文件）
  */
 ciphersRoute.get('/:id/attachment/:attachmentId', async (c) => {
     const db = drizzle(c.env.DB);
@@ -341,21 +342,11 @@ ciphersRoute.get('/:id/attachment/:attachmentId', async (c) => {
         throw new NotFoundError('Attachment metadata not found.');
     }
 
-    const r2Key = `${cipherId}/${attachmentId}`;
-    const file = await c.env.ATTACHMENTS.get(r2Key);
+    // 构建基于请求的绝对下载 URL
+    const baseUrl = new URL(c.req.url);
+    const downloadUrl = `${baseUrl.protocol}//${baseUrl.host}/attachments/${cipherId}/${attachmentId}`;
 
-    if (!file) {
-        throw new NotFoundError('File not found in storage.');
-    }
-
-    const headers = new Headers();
-    if (file.httpMetadata?.contentType) {
-        headers.set('Content-Type', file.httpMetadata.contentType);
-    }
-    headers.set('Content-Disposition', `attachment; filename="${encodeURIComponent(attachmentsMap[attachmentId].fileName)}"`);
-    headers.set('Cache-Control', 'public, max-age=31536000');
-
-    return new Response(file.body, { headers });
+    return c.json({ url: downloadUrl });
 });
 
 /**
