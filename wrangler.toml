@@ -21,3 +21,12 @@ port = 8787
 [[r2_buckets]]
 binding = "ATTACHMENTS"
 bucket_name = "bitwarden-attachments"
+
+# 定时任务 - Cron Triggers
+# 对应官方 Admin/JobsHostedService.cs + Api/JobsHostedService.cs
+[triggers]
+crons = [
+  "*/5 * * * *",   # 每5分钟 - 删除到期 Send (DeleteSendsJob)
+  "0 0 * * *",     # 每日午夜UTC - 永久删除30天前软删除 Cipher (DeleteCiphersJob)
+  "0 22 * * 5",    # 每周五22点UTC - 清理过期 Refresh Token (DatabaseExpiredGrantsJob)
+]

@@ -92,4 +92,14 @@ app.notFound((c) => {
     return c.json({ message: 'Not Found', object: 'error' }, 404);
 });
 
-export default app;
+// 导出 fetch + scheduled 处理器
+// fetch: Hono 处理 HTTP 请求
+// scheduled: Cloudflare Cron Triggers 处理定时任务
+import { handleScheduled } from './services/scheduled';
+
+export default {
+    fetch: app.fetch,
+    async scheduled(controller: ScheduledController, env: Bindings, ctx: ExecutionContext) {
+        ctx.waitUntil(handleScheduled(controller.cron, env));
+    },
+};
