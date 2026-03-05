@@ -89,6 +89,15 @@ app.get('/attachments/:cipherId/:attachmentId', async (c) => {
     return new Response(file.body, { headers });
 });
 
+// Hub (SignalR notifications) - stub endpoint
+// Bitwarden 客户端尝试连接 /hub 进行实时通知推送，Workers 环境不支持 SignalR
+app.get('/hub', (c) => {
+    return c.json({ message: 'SignalR hub is not supported in this implementation.' }, 404);
+});
+app.post('/hub/negotiate', (c) => {
+    return c.json({ message: 'SignalR hub is not supported in this implementation.' }, 404);
+});
+
 // 404 处理
 app.notFound((c) => {
     return c.json({ message: 'Not Found', object: 'error' }, 404);

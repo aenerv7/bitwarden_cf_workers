@@ -11,6 +11,13 @@ import { authMiddleware } from '../middleware/auth';
 import { BadRequestError } from '../middleware/error';
 import { verifyPassword, generateSecureRandomString } from '../services/crypto';
 import { generateAuthenticatorKey, verifyAuthenticatorCode } from '../services/totp';
+import {
+    startWebAuthnRegistration,
+    completeWebAuthnRegistration,
+    deleteWebAuthnCredential,
+    getWebAuthnProvider,
+    getRegisteredKeys,
+} from '../services/webauthn';
 import type {
     Bindings, Variables, TwoFactorProviderType, TwoFactorProviderResponse,
     TwoFactorAuthenticatorResponse, TwoFactorRecoverResponse, TwoFactorProvider
@@ -262,6 +269,158 @@ twoFactor.post('/recover', async (c) => {
     };
 
     return c.json(response);
+});
+
+/**
+ * 获取请求的 Origin（用于 WebAuthn RP ID 推导）
+ */
+function getOrigin(c: Context<{ Bindings: Bindings; Variables: Variables }>): string {
+    return c.req.header('origin') || c.req.header('referer')?.replace(/\/$/, '') || `https://${c.req.header('host') || 'localhost'}`;
+}
+
+/**
+ * 构造 WebAuthn 响应 - 对应 TwoFactorWebAuthnResponseModel
+ */
+function buildWebAuthnResponse(providers: Record<number, any>) {
+    const provider = getWebAuthnProvider(providers);
+    const keys = getRegisteredKeys(provider);
+
+    return {
+        enabled: provider?.enabled ?? false,
+        keys: keys.map(k => ({
+            name: k.data.Name,
+            id: k.id,
+            migrated: k.data.Migrated ?? false,
+            object: 'webAuthnKey',
+        })),
+        object: 'twoFactorWebAuthn',
+    };
+}
+
+/**
+ * POST /api/two-factor/get-webauthn
+ * 获取 WebAuthn 密钥列表
+ */
+twoFactor.post('/get-webauthn', async (c) => {
+    const db = drizzle(c.env.DB);
+    const userId = c.get('userId');
+    const body = await c.req.json();
+
+    const user = await verifySecret(db, userId, body);
+    const providers = getProviders(user);
+
+    return c.json(buildWebAuthnResponse(providers));
+});
+
+/**
+ * POST /api/two-factor/get-webauthn-challenge
+ * 生成 WebAuthn 注册 challenge
+ */
+twoFactor.post('/get-webauthn-challenge', async (c) => {
+    const db = drizzle(c.env.DB);
+    const userId = c.get('userId');
+    const body = await c.req.json();
+
+    const user = await verifySecret(db, userId, body);
+    const providers = getProviders(user);
+    const origin = getOrigin(c);
+    const isPremium = c.get('jwtPayload')?.premium || c.env.GLOBAL_PREMIUM === 'true';
+
+    const { options, updatedProviders } = await startWebAuthnRegistration(
+        { id: userId, name: user.name || '', email: user.email },
+        providers,
+        isPremium,
+        origin,
+    );
+
+    // 保存 pending challenge 到数据库
+    const now = new Date().toISOString();
+    await db.update(users).set({
+        twoFactorProviders: JSON.stringify(updatedProviders),
+        accountRevisionDate: now,
+    }).where(eq(users.id, userId));
+
+    return c.json(options);
+});
+
+/**
+ * PUT/POST /api/two-factor/webauthn
+ * 完成 WebAuthn 注册
+ */
+async function completeWebAuthn(c: Context<{ Bindings: Bindings; Variables: Variables }>) {
+    const db = drizzle(c.env.DB);
+    const userId = c.get('userId');
+    const body = await c.req.json<{
+        id: number;
+        name: string;
+        deviceResponse: any;
+        secret?: string;
+        masterPasswordHash?: string;
+    }>();
+
+    const user = await verifySecret(db, userId, body);
+    const providers = getProviders(user);
+    const origin = getOrigin(c);
+    const isPremium = c.get('jwtPayload')?.premium || c.env.GLOBAL_PREMIUM === 'true';
+
+    const { success, updatedProviders } = await completeWebAuthnRegistration(
+        { id: userId },
+        providers,
+        body.id,
+        body.name,
+        body.deviceResponse,
+        isPremium,
+        origin,
+    );
+
+    if (!success) {
+        throw new BadRequestError('Unable to complete WebAuthn registration.');
+    }
+
+    // 确保有 recovery code
+    const now = new Date().toISOString();
+    let recoveryCode = user.twoFactorRecoveryCode;
+    if (!recoveryCode) {
+        recoveryCode = generateSecureRandomString(32);
+    }
+
+    await db.update(users).set({
+        twoFactorProviders: JSON.stringify(updatedProviders),
+        twoFactorRecoveryCode: recoveryCode,
+        accountRevisionDate: now,
+    }).where(eq(users.id, userId));
+
+    return c.json(buildWebAuthnResponse(updatedProviders));
+}
+
+twoFactor.put('/webauthn', completeWebAuthn);
+twoFactor.post('/webauthn', completeWebAuthn);
+
+/**
+ * DELETE /api/two-factor/webauthn
+ * 删除 WebAuthn 凭证
+ */
+twoFactor.delete('/webauthn', async (c) => {
+    const db = drizzle(c.env.DB);
+    const userId = c.get('userId');
+    const body = await c.req.json<{ id: number; secret?: string; masterPasswordHash?: string }>();
+
+    const user = await verifySecret(db, userId, body);
+    const providers = getProviders(user);
+
+    const { success, updatedProviders } = deleteWebAuthnCredential(providers, body.id);
+
+    if (!success) {
+        throw new BadRequestError('Unable to delete WebAuthn credential.');
+    }
+
+    const now = new Date().toISOString();
+    await db.update(users).set({
+        twoFactorProviders: JSON.stringify(updatedProviders),
+        accountRevisionDate: now,
+    }).where(eq(users.id, userId));
+
+    return c.json(buildWebAuthnResponse(updatedProviders));
 });
 
 export default twoFactor;

@@ -96,6 +96,7 @@ export enum GrantType {
     Password = 'password',
     RefreshToken = 'refresh_token',
     ClientCredentials = 'client_credentials',
+    WebAuthn = 'webauthn',
 }
 
 // ------------- API 请求/响应模型 -------------

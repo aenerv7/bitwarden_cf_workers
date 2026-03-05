@@ -243,3 +243,26 @@ export const authRequests = sqliteTable('auth_requests', {
 }, (table) => [
     index('idx_auth_requests_user_id').on(table.userId),
 ]);
+
+// ==================== WebAuthn Credentials ====================
+// 对应 Core/Auth/Entities/WebAuthnCredential.cs
+// 用于 Passkey 登录（非 2FA），独立于 twoFactorProviders
+export const webAuthnCredentials = sqliteTable('webauthn_credentials', {
+    id: text('id').primaryKey(), // UUID
+    userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    publicKey: text('public_key').notNull(), // Base64URL encoded COSE public key
+    credentialId: text('credential_id').notNull(), // Base64URL encoded credential ID
+    counter: integer('counter').notNull().default(0),
+    type: text('type').notNull().default('public-key'),
+    aaGuid: text('aa_guid'),
+    supportsPrf: integer('supports_prf', { mode: 'boolean' }).notNull().default(false),
+    encryptedUserKey: text('encrypted_user_key'),
+    encryptedPrivateKey: text('encrypted_private_key'),
+    encryptedPublicKey: text('encrypted_public_key'),
+    creationDate: text('creation_date').notNull(),
+    revisionDate: text('revision_date').notNull(),
+}, (table) => [
+    index('idx_webauthn_credentials_user_id').on(table.userId),
+    index('idx_webauthn_credentials_credential_id').on(table.credentialId),
+]);
