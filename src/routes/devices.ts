@@ -58,9 +58,40 @@ devicesRoute.get('/knowndevice', async (c) => {
     return c.json(!!device);
 });
 
-// 以下端点需要认证
+// 以下端点需要认证（除 /knowndevice 外）
 devicesRoute.use('/identifier/*', authMiddleware);
 devicesRoute.use('/current', authMiddleware);
+
+/**
+ * GET /api/devices
+ * 对应 DevicesController.GetDevices
+ * 返回当前用户的已知设备列表
+ */
+devicesRoute.get('/', authMiddleware, async (c) => {
+    const db = drizzle(c.env.DB);
+    const userId = c.get('userId');
+
+    const list = await db.select()
+        .from(devices)
+        .where(eq(devices.userId, userId))
+        .all();
+
+    const data = list.map((device) => ({
+        id: device.id,
+        name: device.name,
+        type: device.type,
+        identifier: device.identifier,
+        creationDate: device.creationDate,
+        revisionDate: device.revisionDate,
+        object: 'device',
+    }));
+
+    return c.json({
+        data,
+        continuationToken: null,
+        object: 'list',
+    });
+});
 
 /**
  * GET /api/devices/identifier/:identifier
