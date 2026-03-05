@@ -151,9 +151,29 @@ export const organizations = sqliteTable('organizations', {
     useTotp: integer('use_totp', { mode: 'boolean' }).default(false),
     useWebAuthn: integer('use_web_authn', { mode: 'boolean' }).default(false),
     enabled: integer('enabled', { mode: 'boolean' }).default(true),
+    publicKey: text('public_key'),
+    privateKey: text('private_key'),
     creationDate: text('creation_date').notNull(),
     revisionDate: text('revision_date').notNull(),
 });
+
+// ==================== Organization Licenses ====================
+// 用于持久化自建组织 license，保持与官方 OrganizationLicense 行为一致
+export const organizationLicenses = sqliteTable('organization_licenses', {
+    organizationId: text('organization_id')
+        .primaryKey()
+        .references(() => organizations.id, { onDelete: 'cascade' }),
+    licenseKey: text('license_key').notNull(),
+    licenseJson: text('license_json').notNull(),
+    issued: text('issued'),
+    expires: text('expires'),
+    selfHost: integer('self_host', { mode: 'boolean' }),
+    installationId: text('installation_id'),
+    creationDate: text('creation_date').notNull(),
+    revisionDate: text('revision_date').notNull(),
+}, (table) => [
+    index('idx_org_licenses_license_key').on(table.licenseKey).unique(),
+]);
 
 // ==================== Events ====================
 // 对应 Core/Dirt/Entities/Event.cs

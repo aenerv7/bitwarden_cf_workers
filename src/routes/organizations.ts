@@ -123,6 +123,46 @@ orgs.get('/:id', async (c) => {
 });
 
 /**
+ * POST /api/organizations/:id/keys
+ * 对应官方 OrganizationsController.PostKeys
+ * 保存组织公钥 / 加密私钥
+ */
+orgs.post('/:id/keys', async (c) => {
+    const db = drizzle(c.env.DB);
+    const orgId = c.req.param('id');
+    const userId = c.get('userId');
+
+    // 确认当前用户是该组织成员（至少 Owner/Admin）
+    await getOrgUser(db, orgId, userId);
+
+    const body = await c.req.json<{ publicKey: string; encryptedPrivateKey: string }>();
+    if (!body.publicKey || !body.encryptedPrivateKey) {
+        throw new BadRequestError('PublicKey and EncryptedPrivateKey are required.');
+    }
+
+    const org = await db.select().from(organizations).where(eq(organizations.id, orgId)).get();
+    if (!org) {
+        throw new NotFoundError('Organization not found.');
+    }
+
+    const now = new Date().toISOString();
+    await db
+        .update(organizations)
+        .set({
+            publicKey: body.publicKey,
+            privateKey: body.encryptedPrivateKey,
+            revisionDate: now,
+        })
+        .where(eq(organizations.id, orgId));
+
+    return c.json({
+        PublicKey: body.publicKey,
+        PrivateKey: body.encryptedPrivateKey,
+        object: 'keys',
+    });
+});
+
+/**
  * GET /api/organizations/:id/events
  * 获取组织的审计事件
  */

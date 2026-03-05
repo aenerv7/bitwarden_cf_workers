@@ -23,6 +23,7 @@ import ciphersRoutes from './routes/ciphers';
 import foldersRoutes from './routes/folders';
 import sendsRoutes from './routes/sends';
 import twoFactorRoutes from './routes/two-factor';
+import organizationLicensesRoutes from './routes/organization-licenses';
 import organizationsRoutes from './routes/organizations';
 import collectionsRoutes from './routes/collections';
 import eventsRoutes from './routes/events';
@@ -70,6 +71,12 @@ app.route('/api/config', configRoutes);
 app.route('/api/devices', devicesRoutes);
 app.route('/api/auth-requests', authRequestsRoutes);
 app.route('/api/webauthn', webauthnRoutes);
+
+// 自建组织 License 相关端点
+// 官方 Web 客户端调用的是 "/organizations/licenses/self-hosted"
+// 但 Workers 里其它路由都在 "/api" 下，所以这里同时挂载两条，保证两种路径都兼容。
+app.route('/organizations/licenses', organizationLicensesRoutes);
+app.route('/api/organizations/licenses', organizationLicensesRoutes);
 
 // 附件文件下载（公开端点，无需 auth - 客户端通过 apiUnauthenticatedService 下载）
 app.get('/attachments/:cipherId/:attachmentId', async (c) => {

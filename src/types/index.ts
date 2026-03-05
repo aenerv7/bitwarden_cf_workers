@@ -12,6 +12,11 @@ export type Bindings = {
     JWT_REFRESH_EXPIRATION: string;
     ATTACHMENTS: R2Bucket;
     GLOBAL_PREMIUM?: string;
+    /**
+     * 可选：用于自建许可证校验的 InstallationId。
+     * 如果设置，将与 license.InstallationId 进行比对，保持与官方一致的校验行为。
+     */
+    INSTALLATION_ID?: string;
 };
 
 // Hono 应用变量
