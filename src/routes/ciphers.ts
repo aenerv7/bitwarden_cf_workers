@@ -694,7 +694,8 @@ ciphersRoute.post('/:id', async (c) => {
 
 /**
  * DELETE /api/ciphers/:id
- * 对应 CiphersController.Delete（软删除）
+ * 对应 CiphersController.Delete（永久删除）
+ * iOS 客户端在回收站中删除时调用此端点
  */
 ciphersRoute.delete('/:id', async (c) => {
     const db = drizzle(c.env.DB);
@@ -708,17 +709,24 @@ ciphersRoute.delete('/:id', async (c) => {
         throw new NotFoundError('Cipher not found.');
     }
 
+    // 删除关联附件（R2 存储）
+    if (existing.attachments) {
+        const attachmentsMap = JSON.parse(existing.attachments);
+        for (const attachmentId of Object.keys(attachmentsMap)) {
+            await c.env.ATTACHMENTS.delete(`${cipherId}/${attachmentId}`);
+        }
+    }
+
+    // 删除 collectionCiphers 关联
+    await db.delete(collectionCiphers).where(eq(collectionCiphers.cipherId, cipherId));
+
+    // 永久删除 cipher 记录
+    await db.delete(ciphers).where(eq(ciphers.id, cipherId));
+
     const now = new Date().toISOString();
-
-    // 软删除（移到回收站）
-    await db.update(ciphers).set({
-        deletedDate: now,
-        revisionDate: now,
-    }).where(eq(ciphers.id, cipherId));
-
     await db.update(users).set({ accountRevisionDate: now }).where(eq(users.id, userId));
 
-    await logEvent(c.env.DB, 1115, { userId, cipherId });
+    await logEvent(c.env.DB, 1102, { userId, cipherId });
 
     return c.body(null, 204);
 });
@@ -769,10 +777,10 @@ ciphersRoute.put('/:id/restore', async (c) => {
 });
 
 /**
- * POST /api/ciphers/delete
- * 对应 CiphersController.DeleteMany（批量软删除）
+ * PUT /api/ciphers/delete
+ * 对应 CiphersController.PutDeleteMany（批量软删除）
  */
-ciphersRoute.post('/delete', async (c) => {
+ciphersRoute.put('/delete', async (c) => {
     const db = drizzle(c.env.DB);
     const userId = c.get('userId');
     const body = await c.req.json<{ ids: string[] }>();
@@ -788,6 +796,41 @@ ciphersRoute.post('/delete', async (c) => {
         await logEvent(c.env.DB, 1115, { userId, cipherId: id });
     }
 
+    await db.update(users).set({ accountRevisionDate: now }).where(eq(users.id, userId));
+    return c.json(null, 200);
+});
+
+/**
+ * POST /api/ciphers/delete
+ * 对应 CiphersController.DeleteMany（批量永久删除）
+ */
+ciphersRoute.post('/delete', async (c) => {
+    const db = drizzle(c.env.DB);
+    const userId = c.get('userId');
+    const body = await c.req.json<{ ids: string[] }>();
+
+    if (!body.ids?.length) {
+        throw new BadRequestError('No cipher ids provided.');
+    }
+
+    for (const id of body.ids) {
+        const cipher = await db.select().from(ciphers)
+            .where(and(eq(ciphers.id, id), eq(ciphers.userId, userId))).get();
+        if (cipher) {
+            // 删除关联附件
+            if (cipher.attachments) {
+                const attachmentsMap = JSON.parse(cipher.attachments);
+                for (const attachmentId of Object.keys(attachmentsMap)) {
+                    await c.env.ATTACHMENTS.delete(`${id}/${attachmentId}`);
+                }
+            }
+            await db.delete(collectionCiphers).where(eq(collectionCiphers.cipherId, id));
+            await db.delete(ciphers).where(eq(ciphers.id, id));
+            await logEvent(c.env.DB, 1102, { userId, cipherId: id });
+        }
+    }
+
+    const now = new Date().toISOString();
     await db.update(users).set({ accountRevisionDate: now }).where(eq(users.id, userId));
     return c.json(null, 200);
 });
