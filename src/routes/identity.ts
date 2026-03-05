@@ -342,21 +342,30 @@ async function handlePasswordGrant(c: any, db: any, body: TokenRequest) {
         }
 
         const providerType = Number(twoFactorProvider);
-        if (!enabledProviders.includes(providerType)) {
-            return c.json({ error: 'invalid_grant', error_description: 'invalid_two_factor_provider', ErrorModel: { Message: 'Invalid 2FA provider.', Object: 'error' } }, 400);
-        }
-
         const token = twoFactorToken;
-        const isRecoveryCode = token === user.twoFactorRecoveryCode;
-        let isValid = isRecoveryCode;
+        let isValid = false;
 
-        if (!isRecoveryCode) {
-            if (providerType === 0) { // Authenticator
-                const authProvider = providers[0];
-                isValid = verifyAuthenticatorCode(authProvider.metaData.Key, token);
-            } else {
-                return c.json({ error: 'invalid_grant', error_description: 'unsupported_provider', ErrorModel: { Message: 'Unsupported 2FA provider.', Object: 'error' } }, 400);
+        if (providerType === 8) {
+            // Recovery code — 特殊处理，不需要在 enabledProviders 中
+            const normalizedToken = token.replace(/\s/g, '').trim().toLowerCase();
+            const storedCode = (user.twoFactorRecoveryCode || '').toLowerCase();
+            isValid = !!storedCode && normalizedToken === storedCode;
+            if (isValid) {
+                // 恢复码使用后，清除所有 2FA providers，重新生成恢复码
+                const now = new Date().toISOString();
+                await db.update(users).set({
+                    twoFactorProviders: null,
+                    twoFactorRecoveryCode: generateSecureRandomString(32),
+                    accountRevisionDate: now,
+                }).where(eq(users.id, user.id));
             }
+        } else if (!enabledProviders.includes(providerType)) {
+            return c.json({ error: 'invalid_grant', error_description: 'invalid_two_factor_provider', ErrorModel: { Message: 'Invalid 2FA provider.', Object: 'error' } }, 400);
+        } else if (providerType === 0) { // Authenticator
+            const authProvider = providers[0];
+            isValid = verifyAuthenticatorCode(authProvider.metaData.Key, token);
+        } else {
+            return c.json({ error: 'invalid_grant', error_description: 'unsupported_provider', ErrorModel: { Message: 'Unsupported 2FA provider.', Object: 'error' } }, 400);
         }
 
         if (!isValid) {

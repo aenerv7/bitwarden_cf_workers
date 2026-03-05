@@ -24,7 +24,8 @@ twoFactor.use('/*', authMiddleware);
 /**
  * 验证 Secret (master password hash)
  */
-async function verifySecret(db: any, userId: string, secret: string) {
+async function verifySecret(db: any, userId: string, body: any) {
+    const secret = body.secret || body.masterPasswordHash || body.otp;
     if (!secret) throw new BadRequestError('User verification failed.');
     const user = await db.select().from(users).where(eq(users.id, userId)).get();
     if (!user) throw new BadRequestError('User verification failed.');
@@ -78,7 +79,7 @@ twoFactor.post('/get-authenticator', async (c) => {
     const userId = c.get('userId');
     const body = await c.req.json<{ secret: string }>();
 
-    const user = await verifySecret(db, userId, body.secret);
+    const user = await verifySecret(db, userId, body);
     const providers = getProviders(user);
     const authProvider = providers[0]; // TwoFactorProviderType.Authenticator
 
@@ -161,7 +162,7 @@ async function disableProvider(c: Context<{ Bindings: Bindings; Variables: Varia
     const userId = c.get('userId');
     const body = await c.req.json<{ type: number; secret: string }>();
 
-    const user = await verifySecret(db, userId, body.secret);
+    const user = await verifySecret(db, userId, body);
     const providers = getProviders(user);
 
     if (providers[body.type]) {
@@ -200,7 +201,7 @@ twoFactor.post('/get-recover', async (c) => {
     const userId = c.get('userId');
     const body = await c.req.json<{ secret: string }>();
 
-    const user = await verifySecret(db, userId, body.secret);
+    const user = await verifySecret(db, userId, body);
 
     const code = user.twoFactorRecoveryCode || generateSecureRandomString(32);
 
@@ -250,7 +251,7 @@ twoFactor.post('/recover', async (c) => {
     const userId = c.get('userId');
     const body = await c.req.json<{ secret: string }>();
 
-    await verifySecret(db, userId, body.secret);
+    await verifySecret(db, userId, body);
 
     const code = generateSecureRandomString(32);
     await db.update(users).set({ twoFactorRecoveryCode: code }).where(eq(users.id, userId));
