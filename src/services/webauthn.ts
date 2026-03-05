@@ -442,7 +442,7 @@ export async function verifyWebAuthnAuthentication(
 /**
  * 最小 CBOR 解码器 - 仅支持 WebAuthn attestationObject 所需的类型
  */
-function decodeCBOR(data: Uint8Array): any {
+export function decodeCBOR(data: Uint8Array): any {
     let offset = 0;
 
     function readByte(): number {

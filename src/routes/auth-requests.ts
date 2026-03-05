@@ -20,7 +20,18 @@ const authRequestsRoute = new Hono<{ Bindings: Bindings; Variables: Variables }>
  * 构建 AuthRequest 响应对象
  * 对应 AuthRequestResponseModel.cs
  */
-function buildAuthRequestResponse(authRequest: any) {
+function buildAuthRequestResponse(authRequest: {
+    id: string;
+    publicKey: string | null;
+    requestDeviceIdentifier: string;
+    requestDeviceType: number;
+    requestIpAddress: string | null;
+    key?: string | null;
+    masterPasswordHash?: string | null;
+    creationDate: string;
+    responseDate: string | null;
+    approved: boolean | null;
+}) {
     return {
         id: authRequest.id,
         publicKey: authRequest.publicKey,
@@ -194,6 +205,60 @@ authRequestsRoute.get('/', async (c) => {
 });
 
 /**
+ * GET /api/auth-requests/pending
+ * 对应 AuthRequestsController.GetPendingAuthRequestsAsync
+ * 获取当前用户所有「待处理」的登录请求（每个设备只返回最新一条）。
+ */
+authRequestsRoute.get('/pending', async (c) => {
+    const db = drizzle(c.env.DB);
+    const userId = c.get('userId');
+
+    // 取出该用户的所有请求，后续在内存中过滤「未过期 + 未处理」并按设备去重。
+    const requests = await db.select()
+        .from(authRequests)
+        .where(eq(authRequests.userId, userId))
+        .all();
+
+    // 过滤掉已过期或已消费的请求（参考 IsAuthRequestValid / GetExpirationDate）
+    const pending = requests.filter((r) => {
+        if (!r) {
+            return false;
+        }
+        if (r.responseDate || r.authenticationDate) {
+            return false;
+        }
+        if (!r.creationDate) {
+            return false;
+        }
+        return !isExpired(r.creationDate);
+    });
+
+    // 按设备标识聚合：每个 requestDeviceIdentifier 仅返回最新一条
+    const latestByDevice = new Map<string, (typeof pending)[number]>();
+    for (const req of pending) {
+        const key = req.requestDeviceIdentifier || '';
+        const existing = latestByDevice.get(key);
+        if (!existing) {
+            latestByDevice.set(key, req);
+            continue;
+        }
+        const existingTime = new Date(existing.creationDate).getTime();
+        const currentTime = new Date(req.creationDate).getTime();
+        if (currentTime > existingTime) {
+            latestByDevice.set(key, req);
+        }
+    }
+
+    const data = Array.from(latestByDevice.values()).map((r) => buildAuthRequestResponse(r));
+
+    return c.json({
+        data,
+        continuationToken: null,
+        object: 'list',
+    });
+});
+
+/**
  * GET /api/auth-requests/:id
  * 对应 AuthRequestsController.Get
  * 获取指定的登录请求
@@ -274,7 +339,13 @@ authRequestsRoute.put('/:id', async (c) => {
     const now = new Date().toISOString();
 
     // 更新 auth request
-    const updateData: Record<string, any> = {
+    const updateData: {
+        responseDate: string;
+        approved: boolean | null;
+        responseDeviceId: string;
+        key?: string | null;
+        masterPasswordHash?: string | null;
+    } = {
         responseDate: now,
         approved: body.requestApproved,
         responseDeviceId: device.id,
@@ -296,7 +367,11 @@ authRequestsRoute.put('/:id', async (c) => {
         .where(eq(authRequests.id, id))
         .get();
 
-    return c.json(buildAuthRequestResponse(updated!));
+    if (!updated) {
+        return c.json({ message: 'Auth request not found.', object: 'error' }, 404);
+    }
+
+    return c.json(buildAuthRequestResponse(updated));
 });
 
 export default authRequestsRoute;
