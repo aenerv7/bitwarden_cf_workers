@@ -287,12 +287,28 @@ sync.get('/', async (c) => {
             };
         });
 
+        // SSH key: 兼容旧的嵌套存储 (data.sshKey.xxx) 和新的扁平存储 (data.xxx)
+        // 如果 keyFingerprint 缺失则不返回 sshKey（iOS 要求该字段为非空 String）
+        let sshKeyData: { privateKey: string; publicKey: string; keyFingerprint: string } | undefined;
+        if (cipher.type === 5) {
+            const pk = data.privateKey || data.sshKey?.privateKey;
+            const pub = data.publicKey || data.sshKey?.publicKey;
+            const fp = data.keyFingerprint || data.sshKey?.keyFingerprint;
+            if (pk && pub && fp) {
+                sshKeyData = { privateKey: pk, publicKey: pub, keyFingerprint: fp };
+            }
+        }
+
+        const responseData = cipher.type === 5 && sshKeyData
+            ? { ...data, ...sshKeyData, sshKey: undefined }
+            : data;
+
         return {
             id: cipher.id,
             organizationId: cipher.organizationId,
             folderId: foldersMap[userId] || null,
             type: cipher.type as CipherType,
-            data: data,
+            data: responseData,
             name: data.name || '',
             notes: data.notes || null,
             favorite: !!favorites[userId],
@@ -301,7 +317,7 @@ sync.get('/', async (c) => {
             card: cipher.type === 3 ? data.card : undefined,
             identity: cipher.type === 4 ? data.identity : undefined,
             secureNote: cipher.type === 2 ? data.secureNote : undefined,
-            sshKey: cipher.type === 5 ? data.sshKey : undefined,
+            sshKey: sshKeyData,
             fields: data.fields || null,
             passwordHistory: data.passwordHistory || null,
             attachments: attachmentsList.length > 0 ? attachmentsList : null,

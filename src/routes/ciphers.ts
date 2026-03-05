@@ -87,12 +87,29 @@ function toCipherResponse(cipher: any, userId: string, baseUrl: string, objectTy
         };
     });
 
+    // SSH key: 兼容旧的嵌套存储 (data.sshKey.xxx) 和新的扁平存储 (data.xxx)
+    // 如果 keyFingerprint 缺失则不返回 sshKey（iOS 要求该字段为非空 String）
+    let sshKeyData: { privateKey: string; publicKey: string; keyFingerprint: string } | undefined;
+    if (cipher.type === 5) {
+        const pk = data.privateKey || data.sshKey?.privateKey;
+        const pub = data.publicKey || data.sshKey?.publicKey;
+        const fp = data.keyFingerprint || data.sshKey?.keyFingerprint;
+        if (pk && pub && fp) {
+            sshKeyData = { privateKey: pk, publicKey: pub, keyFingerprint: fp };
+        }
+    }
+
+    // 官方服务端 data 字段是扁平结构，SSH key 字段直接在根级别
+    const responseData = cipher.type === 5 && sshKeyData
+        ? { ...data, ...sshKeyData, sshKey: undefined }
+        : data;
+
     return {
         id: cipher.id,
         organizationId: cipher.organizationId,
         folderId: folders[userId] || null,
         type: cipher.type as CipherType,
-        data: data, // 原始加密 JSON - 官方 CipherMiniResponseModel 必返回
+        data: responseData,
         name: data.name || '',
         notes: data.notes || null,
         favorite: !!favorites[userId],
@@ -101,7 +118,7 @@ function toCipherResponse(cipher: any, userId: string, baseUrl: string, objectTy
         card: cipher.type === 3 ? data.card : undefined,
         identity: cipher.type === 4 ? data.identity : undefined,
         secureNote: cipher.type === 2 ? data.secureNote : undefined,
-        sshKey: cipher.type === 5 ? data.sshKey : undefined,
+        sshKey: sshKeyData,
         fields: data.fields || null,
         passwordHistory: data.passwordHistory || null,
         attachments: attachments.length > 0 ? attachments : null,
@@ -473,7 +490,11 @@ ciphersRoute.post('/', async (c) => {
     if (body.type === 2) data.secureNote = body.secureNote;
     if (body.type === 3) data.card = body.card;
     if (body.type === 4) data.identity = body.identity;
-    if (body.type === 5) data.sshKey = body.sshKey;
+    if (body.type === 5 && body.sshKey) {
+        data.privateKey = body.sshKey.privateKey;
+        data.publicKey = body.sshKey.publicKey;
+        data.keyFingerprint = body.sshKey.keyFingerprint;
+    }
 
     // favorites 和 folders 使用 per-user 格式
     const favorites: Record<string, boolean> = {};
@@ -543,7 +564,11 @@ ciphersRoute.post('/create', async (c) => {
     if (cipherBody.type === 2) data.secureNote = cipherBody.secureNote;
     if (cipherBody.type === 3) data.card = cipherBody.card;
     if (cipherBody.type === 4) data.identity = cipherBody.identity;
-    if (cipherBody.type === 5) data.sshKey = cipherBody.sshKey;
+    if (cipherBody.type === 5 && cipherBody.sshKey) {
+        data.privateKey = cipherBody.sshKey.privateKey;
+        data.publicKey = cipherBody.sshKey.publicKey;
+        data.keyFingerprint = cipherBody.sshKey.keyFingerprint;
+    }
 
     const favorites: Record<string, boolean> = {};
     if (cipherBody.favorite) favorites[userId] = true;
@@ -601,7 +626,11 @@ ciphersRoute.put('/:id', async (c) => {
     if (body.type === 2) data.secureNote = body.secureNote;
     if (body.type === 3) data.card = body.card;
     if (body.type === 4) data.identity = body.identity;
-    if (body.type === 5) data.sshKey = body.sshKey;
+    if (body.type === 5 && body.sshKey) {
+        data.privateKey = body.sshKey.privateKey;
+        data.publicKey = body.sshKey.publicKey;
+        data.keyFingerprint = body.sshKey.keyFingerprint;
+    }
 
     const existingFavorites = existing.favorites ? JSON.parse(existing.favorites) : {};
     const existingFolders = existing.folders ? JSON.parse(existing.folders) : {};
@@ -661,7 +690,11 @@ ciphersRoute.post('/:id', async (c) => {
     if (body.type === 2) data.secureNote = body.secureNote;
     if (body.type === 3) data.card = body.card;
     if (body.type === 4) data.identity = body.identity;
-    if (body.type === 5) data.sshKey = body.sshKey;
+    if (body.type === 5 && body.sshKey) {
+        data.privateKey = body.sshKey.privateKey;
+        data.publicKey = body.sshKey.publicKey;
+        data.keyFingerprint = body.sshKey.keyFingerprint;
+    }
 
     const existingFavorites = existing.favorites ? JSON.parse(existing.favorites) : {};
     const existingFolders = existing.folders ? JSON.parse(existing.folders) : {};
