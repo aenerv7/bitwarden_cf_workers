@@ -9,7 +9,7 @@
 
 import { drizzle } from 'drizzle-orm/d1';
 import { lte, and, isNotNull, sql } from 'drizzle-orm';
-import { sends, ciphers, refreshTokens, collectionCiphers } from '../db/schema';
+import { sends, ciphers, refreshTokens, collectionCiphers, authRequests } from '../db/schema';
 import type { Bindings } from '../types';
 
 /**
@@ -21,6 +21,7 @@ export async function handleScheduled(cron: string, env: Bindings): Promise<void
     switch (cron) {
         case '*/5 * * * *':
             await deleteSends(env);
+            await deleteExpiredAuthRequests(env);
             break;
         case '0 0 * * *':
             await deleteTrashedCiphers(env);
@@ -160,4 +161,22 @@ async function deleteExpiredRefreshTokens(env: Bindings): Promise<void> {
         .where(lte(refreshTokens.expirationDate, now));
 
     console.log(`[DeleteExpiredTokens] Cleaned up expired refresh tokens.`);
+}
+
+/**
+ * 删除过期 Auth Requests
+ * 对应 Admin/Auth/Jobs/DeleteAuthRequestsJob.cs
+ *
+ * 官方逻辑：删除 creationDate > 15 分钟的 auth requests
+ * AuthRequest.GetExpirationDate() = CreationDate.AddMinutes(15)
+ */
+async function deleteExpiredAuthRequests(env: Bindings): Promise<void> {
+    const db = drizzle(env.DB);
+    const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+
+    const result = await db
+        .delete(authRequests)
+        .where(lte(authRequests.creationDate, fifteenMinutesAgo));
+
+    console.log(`[DeleteAuthRequests] Cleaned up expired auth requests.`);
 }

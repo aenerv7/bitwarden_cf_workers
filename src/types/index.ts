@@ -382,6 +382,29 @@ export interface SendAccessResponse {
     object: string;
 }
 
+// ------------- Auth Request 类型 - 对应 Core/Auth/Enums/AuthRequestType.cs -------------
+
+export enum AuthRequestType {
+    AuthenticateAndUnlock = 0,
+    Unlock = 1,
+    AdminApproval = 2,
+}
+
+export interface AuthRequestCreateRequest {
+    email: string;
+    publicKey: string;
+    deviceIdentifier: string;
+    accessCode: string;
+    type: AuthRequestType;
+}
+
+export interface AuthRequestUpdateRequest {
+    key?: string;
+    masterPasswordHash?: string;
+    deviceIdentifier: string;
+    requestApproved: boolean;
+}
+
 // ------------- 两步验证 (2FA) 类型 -------------
 
 export enum TwoFactorProviderType {

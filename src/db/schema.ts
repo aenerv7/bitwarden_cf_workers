@@ -220,3 +220,26 @@ export const collectionUsers = sqliteTable('collection_users', {
     primaryKey({ columns: [table.collectionId, table.organizationUserId] }),
     index('idx_coll_users_org_user_id').on(table.organizationUserId),
 ]);
+
+// ==================== Auth Requests ====================
+// 对应 Core/Auth/Entities/AuthRequest.cs
+// 用于 Passwordless Login（使用其他设备登录）
+export const authRequests = sqliteTable('auth_requests', {
+    id: text('id').primaryKey(), // UUID
+    userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    type: integer('type').notNull().default(0), // 0=AuthenticateAndUnlock, 1=Unlock, 2=AdminApproval
+    requestDeviceIdentifier: text('request_device_identifier').notNull(),
+    requestDeviceType: integer('request_device_type').notNull(),
+    requestIpAddress: text('request_ip_address'),
+    responseDeviceId: text('response_device_id').references(() => devices.id),
+    accessCode: text('access_code').notNull(),
+    publicKey: text('public_key').notNull(),
+    key: text('key'),
+    masterPasswordHash: text('master_password_hash'),
+    approved: integer('approved', { mode: 'boolean' }), // null=pending, true=approved, false=denied
+    creationDate: text('creation_date').notNull(), // ISO 8601
+    responseDate: text('response_date'),
+    authenticationDate: text('authentication_date'),
+}, (table) => [
+    index('idx_auth_requests_user_id').on(table.userId),
+]);
