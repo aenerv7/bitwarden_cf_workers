@@ -279,6 +279,42 @@ ciphersRoute.get('/organization-details/assigned', async (c) => {
 });
 
 /**
+ * GET /api/ciphers/:id/details
+ * 对应 CiphersController.GetDetails
+ * 返回单个 cipher 的详细信息（供 Web / App 客户端使用）
+ */
+ciphersRoute.get('/:id/details', async (c) => {
+    const db = drizzle(c.env.DB);
+    const userId = c.get('userId');
+    const cipherId = c.req.param('id');
+
+    const cipher = await db.select().from(ciphers).where(eq(ciphers.id, cipherId)).get();
+    if (!cipher) {
+        throw new NotFoundError('Cipher not found.');
+    }
+
+    // 个人条目：必须是当前用户所有
+    if (!cipher.organizationId) {
+        if (cipher.userId !== userId) {
+            throw new NotFoundError('Cipher not found.');
+        }
+    } else {
+        // 组织条目：要求当前用户是该组织的已确认成员
+        const orgUser = await db.select().from(organizationUsers)
+            .where(and(
+                eq(organizationUsers.organizationId, cipher.organizationId),
+                eq(organizationUsers.userId, userId),
+            )).get();
+
+        if (!orgUser || orgUser.status !== 2) {
+            throw new NotFoundError('Cipher not found.');
+        }
+    }
+
+    return c.json(toCipherResponse(cipher, userId, getBaseUrl(c), 'cipherDetails'));
+});
+
+/**
  * GET /api/ciphers/:id/admin
  * 对应 CiphersController.GetAdmin
  * 管理员查看组织内任意密码条目（需 ViewAllCollections 权限：Owner/Admin 或 EditAnyCollection/DeleteAnyCollection）
