@@ -13,26 +13,23 @@
 
 ## 已实现的 API
 
-| 模块 | 端点 | 方法 | 描述 |
-|------|------|------|------|
-| Identity | `/identity/accounts/prelogin` | POST | 获取 KDF 参数 |
-| Identity | `/identity/accounts/register` | POST | 用户注册 |
-| Identity | `/identity/connect/token` | POST | 登录 (password/refresh_token grant) |
-| Accounts | `/api/accounts/profile` | GET/PUT/POST | 用户资料管理 |
-| Accounts | `/api/accounts/revision-date` | GET | 账户修订日期 |
-| Accounts | `/api/accounts/keys` | GET/POST | 密钥管理 |
-| Accounts | `/api/accounts/password` | POST | 修改密码 |
-| Sync | `/api/sync` | GET | 全量同步 |
-| Ciphers | `/api/ciphers` | GET/POST | 密码条目列表/创建 |
-| Ciphers | `/api/ciphers/:id` | GET/PUT/DELETE | 单条目操作 |
-| Ciphers | `/api/ciphers/:id/delete` | PUT | 软删除 |
-| Ciphers | `/api/ciphers/:id/restore` | PUT | 恢复 |
-| Ciphers | `/api/ciphers/delete` | POST | 批量删除 |
-| Ciphers | `/api/ciphers/move` | PUT | 批量移动 |
-| Ciphers | `/api/ciphers/purge` | POST | 清空 |
-| Folders | `/api/folders` | GET/POST | 文件夹列表/创建 |
-| Folders | `/api/folders/:id` | GET/PUT/DELETE | 文件夹操作 |
-| Config | `/api/config` | GET | 服务端配置 |
+| 模块 | 端点 | 描述 |
+|------|------|------|
+| Identity | `/identity/*` | 用户认证、KDF、登录、Token 颁发、双因素验证 |
+| Accounts | `/api/accounts/*` | 用户资料、密钥管理、主密码修改、公钥同步 |
+| Sync | `/api/sync` | 全量及增量数据同步 (Ciphers, Folders, Collections, Orgs, Devices) |
+| Ciphers | `/api/ciphers/*` | 密码条目 CRUD、批量操作、集合与附件管理、分享 |
+| Folders | `/api/folders/*` | 个人文件夹管理 |
+| Organizations | `/api/organizations/*` | 组织管理、成员管理、集合管理、群组与策略管理 |
+| Collections | `/api/collections/*` | 集合管理 |
+| Auth-Requests| `/api/auth-requests/*`| 登录请求（免密登录验证） |
+| Devices | `/api/devices/*` | 设备列表与管理、推送通知令牌 |
+| Events | `/api/events/*` | 审计日志与系统事件收集 |
+| Two-factor | `/api/two-factor/*` | 2FA/MFA 设置（Authenticator, WebAuthn 等） |
+| WebAuthn | `/api/webauthn/*` | 验证器、通行密钥注册与认证 |
+| Sends | `/api/sends/*` | Bitwarden Send (加密文本/文件分享) |
+| Tasks | `/api/tasks/*` | 计划任务触发与内部定时管理 |
+| Config | `/api/config` | 服务端配置获取 |
 
 ## 快速开始
 
@@ -87,26 +84,28 @@ npm run deploy
 workers/
 ├── src/
 │   ├── index.ts              # Worker 入口，路由挂载
-│   ├── routes/
-│   │   ├── identity.ts       # 认证（Prelogin/Register/Token）
-│   │   ├── accounts.ts       # 账户管理
-│   │   ├── sync.ts           # 全量同步
-│   │   ├── ciphers.ts        # 密码条目 CRUD
-│   │   ├── folders.ts        # 文件夹 CRUD
-│   │   └── config.ts         # 服务端配置
-│   ├── middleware/
-│   │   ├── auth.ts           # JWT 认证中间件
-│   │   └── error.ts          # 错误处理
-│   ├── db/
-│   │   └── schema.ts         # Drizzle ORM 表定义
-│   ├── services/
-│   │   └── crypto.ts         # 加密/哈希服务
-│   └── types/
-│       └── index.ts          # TypeScript 类型定义
-├── drizzle/                  # 生成的 SQL 迁移文件
-├── wrangler.toml             # Workers 配置
-├── drizzle.config.ts         # Drizzle Kit 配置
-├── tsconfig.json
+│   ├── routes/               # API 路由目录
+│   │   ├── identity.ts       # 认证及 Token
+│   │   ├── accounts.ts       # 账户配置
+│   │   ├── sync.ts           # 数据同步
+│   │   ├── ciphers.ts        # 密码管理
+│   │   ├── organizations.ts  # 组织/企业管理
+│   │   ├── folders.ts        # 文件夹
+│   │   ├── collections.ts    # 集合管理
+│   │   ├── two-factor.ts     # 双重身份验证设置
+│   │   ├── webauthn.ts       # 通行密钥
+│   │   ├── sends.ts          # 分享管理
+│   │   ├── devices.ts        # 登录设备
+│   │   ├── auth-requests.ts  # 免密码登录验证请求
+│   │   ├── events.ts         # 审计日志
+│   │   └── config.ts         # 服务端设定
+│   ├── middleware/           # 中间件（授权，错误捕获）
+│   ├── db/                   # Drizzle 数据库模式定义
+│   ├── services/             # 定时任务、加密解密服务
+│   └── types/                # 类型定义
+├── drizzle/                  # SQL 迁移文件
+├── wrangler.toml             # Workers 部署配置
+├── drizzle.config.ts         # Drizzle Studio 配置
 └── package.json
 ```
 
