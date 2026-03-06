@@ -5,3 +5,6 @@ dist/
 *.log
 
 .DS_Store
+
+# 本地 dry-run 结果目录
+.dry-run-out/
