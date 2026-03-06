@@ -3,7 +3,7 @@
  * 对应原始项目的异常处理和 HTTP 错误响应
  */
 
-import { Context, MiddlewareHandler } from 'hono';
+import { Context, ErrorHandler as HonoErrorHandler, MiddlewareHandler } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 
 /**
@@ -30,45 +30,47 @@ export class UnauthorizedError extends Error {
     }
 }
 
+function buildErrorResponse(c: Context, err: Error) {
+    const body = { message: '', validationErrors: null, exceptionMessage: null, exceptionStackTrace: null, innerExceptionMessage: null, object: 'error' };
+
+    if (err instanceof HTTPException) {
+        body.message = err.message;
+        return c.json(body, err.status);
+    }
+    if (err instanceof BadRequestError) {
+        body.message = err.message;
+        return c.json(body, 400);
+    }
+    if (err instanceof NotFoundError) {
+        body.message = err.message;
+        return c.json(body, 404);
+    }
+    if (err instanceof UnauthorizedError) {
+        body.message = err.message;
+        return c.json(body, 401);
+    }
+
+    console.error('Unhandled error:', err);
+    body.message = 'An error has occurred.';
+    return c.json(body, 500);
+}
+
 /**
- * 全局错误处理中间件
+ * 全局错误处理中间件（try-catch 模式，兜底用）
  */
 export const errorHandler: MiddlewareHandler = async (c, next) => {
     try {
         await next();
     } catch (err) {
-        if (err instanceof HTTPException) {
-            return c.json(
-                { message: err.message, validationErrors: null, exceptionMessage: null, exceptionStackTrace: null, innerExceptionMessage: null, object: 'error' },
-                err.status
-            );
-        }
-
-        if (err instanceof BadRequestError) {
-            return c.json(
-                { message: err.message, validationErrors: null, exceptionMessage: null, exceptionStackTrace: null, innerExceptionMessage: null, object: 'error' },
-                400
-            );
-        }
-
-        if (err instanceof NotFoundError) {
-            return c.json(
-                { message: err.message, validationErrors: null, exceptionMessage: null, exceptionStackTrace: null, innerExceptionMessage: null, object: 'error' },
-                404
-            );
-        }
-
-        if (err instanceof UnauthorizedError) {
-            return c.json(
-                { message: err.message, validationErrors: null, exceptionMessage: null, exceptionStackTrace: null, innerExceptionMessage: null, object: 'error' },
-                401
-            );
-        }
-
-        console.error('Unhandled error:', err);
-        return c.json(
-            { message: 'An error has occurred.', validationErrors: null, exceptionMessage: null, exceptionStackTrace: null, innerExceptionMessage: null, object: 'error' },
-            500
-        );
+        return buildErrorResponse(c, err as Error);
     }
+};
+
+/**
+ * Hono app.onError 全局错误处理钩子。
+ * 子路由 (app.route) 抛出的异常可能绕过中间件的 try-catch，
+ * 必须通过 onError 捕获，否则 Hono 会返回默认的 "Internal Server Error" 纯文本 500。
+ */
+export const globalErrorHandler: HonoErrorHandler = (err, c) => {
+    return buildErrorResponse(c, err);
 };

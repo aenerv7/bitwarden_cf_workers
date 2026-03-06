@@ -15,7 +15,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
-import { errorHandler } from './middleware/error';
+import { errorHandler, globalErrorHandler } from './middleware/error';
 import { debugMiddleware } from './middleware/debug';
 import identityRoutes from './routes/identity';
 import accountsRoutes from './routes/accounts';
@@ -41,6 +41,9 @@ import reportsRoutes from './routes/reports';
 import type { Bindings, Variables } from './types';
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
+
+// 全局错误处理（捕获子路由异常，防止 Hono 返回默认纯文本 500）
+app.onError(globalErrorHandler);
 
 // 全局中间件
 app.use('*', cors({
