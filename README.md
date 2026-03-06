@@ -73,6 +73,52 @@ npx wrangler secret put JWT_SECRET
 npm run deploy
 ```
 
+### 自动化部署（GitHub Actions）
+
+项目已配置 GitHub Actions，代码推送到 `main` 分支时会自动完成类型检查、数据库迁移和部署。
+
+#### 前置准备
+
+1. **创建 Cloudflare 资源**（仅首次）：
+
+```bash
+# 创建 D1 数据库
+npx wrangler d1 create bitwarden-db
+
+# 创建 R2 存储桶
+npx wrangler r2 bucket create bitwarden-attachments
+
+# 设置生产环境 JWT_SECRET（Worker Secret 会覆盖 wrangler.toml 中的明文变量）
+npx wrangler secret put JWT_SECRET
+```
+
+2. **创建 Cloudflare API Token**：
+
+   前往 [Cloudflare Dashboard > API Tokens](https://dash.cloudflare.com/profile/api-tokens)，创建自定义 Token，需要以下权限：
+   - Account > Cloudflare Workers > Edit
+   - Account > D1 > Edit
+   - Account > R2 > Edit
+
+3. **配置 GitHub Secrets**：
+
+   在 workers 仓库的 **Settings > Secrets and variables > Actions** 中添加：
+
+   | Secret 名称 | 说明 |
+   |---|---|
+   | `CLOUDFLARE_API_TOKEN` | 上一步创建的 Cloudflare API Token |
+   | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare Account ID（在 Dashboard 首页右侧可见） |
+   | `D1_DATABASE_ID` | D1 数据库 ID（通过 `npx wrangler d1 list` 查看） |
+
+#### 部署流程
+
+配置完成后，每次向 `main` 分支推送代码，GitHub Actions 会自动执行：
+
+1. 安装依赖并进行 TypeScript 类型检查
+2. 将 D1 数据库迁移应用到生产环境
+3. 部署 Worker 到 Cloudflare
+
+可在仓库的 **Actions** 标签页查看部署状态和日志。
+
 ### 配置 Bitwarden 客户端
 
 在 Bitwarden 客户端中设置自托管服务器地址：
