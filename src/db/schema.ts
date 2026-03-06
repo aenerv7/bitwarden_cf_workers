@@ -393,8 +393,36 @@ export const policies = sqliteTable('policies', {
     index('idx_policies_organization_id').on(table.organizationId),
 ]);
 
+// ==================== Organization Reports ====================
+// 对应 Core/Dirt/Entities/OrganizationReport.cs
+export const organizationReports = sqliteTable('organization_reports', {
+    id: text('id').primaryKey(), // UUID
+    organizationId: text('organization_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
+    reportData: text('report_data').notNull().default(''),
+    contentEncryptionKey: text('content_encryption_key').notNull().default(''),
+    summaryData: text('summary_data'),
+    applicationData: text('application_data'),
+    applicationCount: integer('application_count'),
+    applicationAtRiskCount: integer('application_at_risk_count'),
+    criticalApplicationCount: integer('critical_application_count'),
+    criticalApplicationAtRiskCount: integer('critical_application_at_risk_count'),
+    memberCount: integer('member_count'),
+    memberAtRiskCount: integer('member_at_risk_count'),
+    criticalMemberCount: integer('critical_member_count'),
+    criticalMemberAtRiskCount: integer('critical_member_at_risk_count'),
+    passwordCount: integer('password_count'),
+    passwordAtRiskCount: integer('password_at_risk_count'),
+    criticalPasswordCount: integer('critical_password_count'),
+    criticalPasswordAtRiskCount: integer('critical_password_at_risk_count'),
+    creationDate: text('creation_date').notNull(),
+    revisionDate: text('revision_date').notNull(),
+}, (table) => [
+    index('idx_org_reports_org_id').on(table.organizationId),
+]);
+
 // ==================== 推断类型（供路由等使用，避免 any） ====================
 export type OrganizationUserRow = typeof organizationUsers.$inferSelect;
 export type OrganizationRow = typeof organizations.$inferSelect;
 export type UserRow = typeof users.$inferSelect;
 export type PolicyRow = typeof policies.$inferSelect;
+export type OrganizationReportRow = typeof organizationReports.$inferSelect;

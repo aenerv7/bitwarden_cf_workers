@@ -37,6 +37,7 @@ import webauthnRoutes from './routes/webauthn';
 import hubRoutes from './routes/hub';
 import emergencyAccessRoutes from './routes/emergency-access';
 import settingsRoutes from './routes/settings';
+import reportsRoutes from './routes/reports';
 import type { Bindings, Variables } from './types';
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
@@ -80,6 +81,7 @@ app.route('/api/auth-requests', authRequestsRoutes);
 app.route('/api/webauthn', webauthnRoutes);
 app.route('/api/emergency-access', emergencyAccessRoutes);
 app.route('/api/settings', settingsRoutes);
+app.route('/api/reports', reportsRoutes);
 
 // 自建组织 License 相关端点
 // 官方 Web 客户端调用的是 "/organizations/licenses/self-hosted"

@@ -13,13 +13,36 @@ tasks.use('/*', authMiddleware);
 
 /**
  * GET /api/tasks
- * 当前用户的安全任务列表；无表时返回空列表
+ * 对应 SecurityTaskController.Get — 当前用户的安全任务列表
  */
 tasks.get('/', (c) =>
     c.json({
         data: [],
         object: 'list',
         continuationToken: null,
+    })
+);
+
+/**
+ * GET /api/tasks/organization?organizationId=xxx
+ * 对应 SecurityTaskController.ListForOrganization — 组织的安全任务列表
+ */
+tasks.get('/organization', (c) =>
+    c.json({
+        data: [],
+        object: 'list',
+        continuationToken: null,
+    })
+);
+
+/**
+ * GET /api/tasks/:orgId/metrics
+ * 对应 SecurityTaskController.GetTaskMetricsForOrganization
+ */
+tasks.get('/:orgId/metrics', (c) =>
+    c.json({
+        completedTasks: 0,
+        totalTasks: 0,
     })
 );
 
