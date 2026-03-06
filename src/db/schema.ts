@@ -223,7 +223,7 @@ export const organizationLicenses = sqliteTable('organization_licenses', {
 ]);
 
 // ==================== Events ====================
-// 对应 Core/Dirt/Entities/Event.cs
+// 对应 Core/Dirt/Entities/Event.cs 与 EventResponseModel
 export const events = sqliteTable('events', {
     id: text('id').primaryKey(), // UUID
     type: integer('type').notNull(), // EventType enum
@@ -231,12 +231,17 @@ export const events = sqliteTable('events', {
     organizationId: text('organization_id'),
     cipherId: text('cipher_id'),
     collectionId: text('collection_id'),
+    groupId: text('group_id'),       // 事件目标群组（如 Group_Created/Updated/Deleted）
+    organizationUserId: text('organization_user_id'), // 事件目标组织用户（如 Invited/Confirmed/Updated）
     actingUserId: text('acting_user_id'),
     date: text('date').notNull(), // ISO 8601
     deviceType: integer('device_type'), // DeviceType enum
     ipAddress: text('ip_address'),
     systemUser: integer('system_user'),
-});
+}, (table) => [
+    index('idx_events_organization_id').on(table.organizationId),
+    index('idx_events_date').on(table.date),
+]);
 
 // ==================== Organization Users ====================
 // 对应 Core/Entities/OrganizationUser.cs

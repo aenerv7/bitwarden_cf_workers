@@ -7,6 +7,8 @@ export interface EventContext {
     organizationId?: string;
     cipherId?: string;
     collectionId?: string;
+    groupId?: string;
+    organizationUserId?: string;
     actingUserId?: string;
     deviceType?: number;
     ipAddress?: string;
@@ -25,14 +27,16 @@ export async function logEvent(
     await db.insert(events).values({
         id: generateUuid(),
         type: type,
-        userId: context.userId || null,
-        organizationId: context.organizationId || null,
-        cipherId: context.cipherId || null,
-        collectionId: context.collectionId || null,
-        actingUserId: context.actingUserId || null,
+        userId: context.userId ?? null,
+        organizationId: context.organizationId ?? null,
+        cipherId: context.cipherId ?? null,
+        collectionId: context.collectionId ?? null,
+        groupId: context.groupId ?? null,
+        organizationUserId: context.organizationUserId ?? null,
+        actingUserId: context.actingUserId ?? null,
         date: now,
-        deviceType: context.deviceType || null,
-        ipAddress: context.ipAddress || null,
-        systemUser: context.systemUser || null,
+        deviceType: context.deviceType ?? null,
+        ipAddress: context.ipAddress ?? null,
+        systemUser: context.systemUser ?? null,
     }).run();
 }

@@ -5,11 +5,11 @@
 
 import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
-import { eq, and, desc, inArray } from 'drizzle-orm';
+import { eq, and, desc, inArray, sql } from 'drizzle-orm';
 import { organizations, organizationUsers, users, events, collections, collectionUsers, groups, groupUsers, collectionGroups } from '../db/schema';
 import { authMiddleware } from '../middleware/auth';
 import { logEvent } from '../services/events';
-import { toEventResponse } from './events';
+import { toEventResponse, getDateRange, getDeviceTypeFromRequest } from './events';
 import { BadRequestError, NotFoundError } from '../middleware/error';
 import { generateUuid, createInviteToken, verifyInviteToken } from '../services/crypto';
 import { toOrganizationResponse, toOrganizationUserResponse } from '../models/organization-responses';
@@ -48,6 +48,18 @@ function requireOwnerOrAdmin(orgUser: any) {
 function requireOwner(orgUser: any) {
     if (orgUser.type !== 0) {
         throw new BadRequestError('Requires Owner privileges.');
+    }
+}
+
+/** 是否有权查看事件日志：组织开启 useEvents 且 (Owner/Admin 或 permissions.accessEventLogs) */
+function canAccessEventLogs(org: any, orgUser: any): boolean {
+    if (!org?.useEvents) return false;
+    if (orgUser.type === 0 || orgUser.type === 1) return true; // Owner, Admin
+    try {
+        const perms = orgUser.permissions ? JSON.parse(orgUser.permissions) : null;
+        return !!(perms && perms.accessEventLogs);
+    } catch {
+        return false;
     }
 }
 
@@ -166,7 +178,7 @@ orgs.post('/', async (c) => {
         });
     }
 
-    await logEvent(c.env.DB, 1600, { userId, organizationId: orgId });
+    await logEvent(c.env.DB, 1600, { userId, organizationId: orgId, deviceType: getDeviceTypeFromRequest(c) });
 
     const org = await db.select().from(organizations).where(eq(organizations.id, orgId)).get();
     return c.json(toOrganizationResponse(org));
@@ -296,7 +308,7 @@ orgs.delete('/:id', async (c) => {
     // body 中可能有 masterPasswordHash，但我们暂不验证
     await db.delete(organizations).where(eq(organizations.id, orgId));
 
-    await logEvent(c.env.DB, 1601, { userId, organizationId: orgId });
+    await logEvent(c.env.DB, 1601, { userId, organizationId: orgId, deviceType: getDeviceTypeFromRequest(c) });
 
     return c.json({});
 });
@@ -316,7 +328,7 @@ orgs.post('/:id/delete', async (c) => {
     if (!org) throw new NotFoundError('Organization not found.');
 
     await db.delete(organizations).where(eq(organizations.id, orgId));
-    await logEvent(c.env.DB, 1601, { userId, organizationId: orgId });
+    await logEvent(c.env.DB, 1601, { userId, organizationId: orgId, deviceType: getDeviceTypeFromRequest(c) });
 
     return c.json({});
 });
@@ -349,7 +361,7 @@ orgs.post('/:id/leave', async (c) => {
     }
 
     await db.delete(organizationUsers).where(eq(organizationUsers.id, orgUser.id));
-    await logEvent(c.env.DB, 1504, { userId, organizationId: orgId });
+    await logEvent(c.env.DB, 1504, { userId, organizationId: orgId, deviceType: getDeviceTypeFromRequest(c) });
 
     return c.body(null, 200);
 });
@@ -424,27 +436,66 @@ orgs.get('/:id/keys', async (c) => {
 
 // ==================== 组织事件 ====================
 
+const EVENTS_PAGE_SIZE = 100;
+
 /**
  * GET /api/organizations/:id/events
+ * 组织事件日志；支持 start, end, continuationToken（与官方 EventsController.GetOrganization 一致）
+ * 权限：组织 useEvents 开启且 (Owner/Admin 或 accessEventLogs)
  */
 orgs.get('/:id/events', async (c) => {
     const db = drizzle(c.env.DB);
     const userId = c.get('userId');
     const orgId = c.req.param('id');
+    const start = c.req.query('start') ?? null;
+    const end = c.req.query('end') ?? null;
+    const continuationToken = c.req.query('continuationToken') ?? null;
 
     const orgUser = await getOrgUser(db, orgId, userId);
-    requireOwnerOrAdmin(orgUser);
+    const org = await db.select().from(organizations).where(eq(organizations.id, orgId)).get();
+    if (!org) throw new NotFoundError('Organization not found.');
+    if (!canAccessEventLogs(org, orgUser)) {
+        throw new NotFoundError('Organization not found.');
+    }
+
+    const { start: startStr, end: endStr } = getDateRange(start, end);
+
+    let conditions = and(
+        eq(events.organizationId, orgId),
+        sql`${events.date} >= ${startStr}`,
+        sql`${events.date} <= ${endStr}`,
+    );
+    if (continuationToken) {
+        try {
+            const decoded = Buffer.from(continuationToken, 'base64url').toString('utf8');
+            const [tokenDate, tokenId] = decoded.split('|');
+            if (tokenDate && tokenId) {
+                conditions = and(
+                    conditions,
+                    sql`(${events.date} < ${tokenDate} OR (${events.date} = ${tokenDate} AND ${events.id} < ${tokenId}))`,
+                );
+            }
+        } catch {
+            /* ignore invalid token */
+        }
+    }
 
     const orgEvents = await db.select().from(events)
-        .where(eq(events.organizationId, orgId))
-        .orderBy(desc(events.date))
-        .limit(50)
+        .where(conditions)
+        .orderBy(desc(events.date), desc(events.id))
+        .limit(EVENTS_PAGE_SIZE + 1)
         .all();
 
+    const hasMore = orgEvents.length > EVENTS_PAGE_SIZE;
+    const page = hasMore ? orgEvents.slice(0, EVENTS_PAGE_SIZE) : orgEvents;
+    const nextToken = hasMore && page.length
+        ? Buffer.from(`${page[page.length - 1].date}|${page[page.length - 1].id}`).toString('base64url')
+        : null;
+
     return c.json({
-        data: orgEvents.map(toEventResponse),
+        data: page.map(toEventResponse),
         object: 'list',
-        continuationToken: null,
+        continuationToken: nextToken,
     });
 });
 
@@ -664,6 +715,8 @@ orgs.post('/:id/users/invite', async (c) => {
             userId: existingAppUser ? existingAppUser.id : undefined,
             actingUserId: userId,
             organizationId: orgId,
+            organizationUserId: newOrgUserId,
+            deviceType: getDeviceTypeFromRequest(c),
         });
 
         const token = await createInviteToken(newOrgUserId, targetEmail, orgId, c.env.JWT_SECRET);
@@ -737,7 +790,12 @@ orgs.post('/:id/users/:orgUserId/accept', async (c) => {
         revisionDate: now,
     }).where(eq(organizationUsers.id, orgUserId));
 
-    await logEvent(c.env.DB, 1501, { userId, organizationId: orgId });
+    await logEvent(c.env.DB, 1501, {
+        userId,
+        organizationId: orgId,
+        organizationUserId: orgUserId,
+        deviceType: getDeviceTypeFromRequest(c),
+    });
 
     return c.body(null, 200);
 });
@@ -776,10 +834,12 @@ orgs.post('/:id/users/:orgUserId/confirm', async (c) => {
         revisionDate: now,
     }).where(eq(organizationUsers.id, orgUserId));
 
-    await logEvent(c.env.DB, 1502, {
+    await logEvent(c.env.DB, 1501, {
         userId: targetOrgUser.userId || undefined,
         actingUserId: userId,
         organizationId: orgId,
+        organizationUserId: orgUserId,
+        deviceType: getDeviceTypeFromRequest(c),
     });
 
     return c.body(null, 200);
@@ -818,6 +878,13 @@ orgs.post('/:id/users/confirm', async (c) => {
             status: 2,
             revisionDate: now,
         }).where(eq(organizationUsers.id, ouId));
+
+        await logEvent(c.env.DB, 1501, {
+            organizationId: orgId,
+            actingUserId: userId,
+            organizationUserId: ouId,
+            deviceType: getDeviceTypeFromRequest(c),
+        });
 
         results.push({ id: ouId, error: '' });
     }
@@ -920,6 +987,14 @@ orgs.put('/:id/users/:orgUserId', async (c) => {
 
     await db.update(organizationUsers).set(updateData).where(eq(organizationUsers.id, orgUserId));
 
+    await logEvent(c.env.DB, 1502, {
+        userId: targetOrgUser.userId ?? undefined,
+        actingUserId: userId,
+        organizationId: orgId,
+        organizationUserId: orgUserId,
+        deviceType: getDeviceTypeFromRequest(c),
+    });
+
     // 更新 collection 权限
     if (body.collections) {
         // 删除旧权限并重建
@@ -1012,6 +1087,8 @@ orgs.delete('/:id/users/:orgUserId', async (c) => {
         userId: targetUser.userId || undefined,
         actingUserId: userId,
         organizationId: orgId,
+        organizationUserId: orgUserId,
+        deviceType: getDeviceTypeFromRequest(c),
     });
 
     return c.json({});
@@ -1039,6 +1116,8 @@ orgs.post('/:id/users/:orgUserId/remove', async (c) => {
         userId: targetUser.userId || undefined,
         actingUserId: userId,
         organizationId: orgId,
+        organizationUserId: orgUserId,
+        deviceType: getDeviceTypeFromRequest(c),
     });
 
     return c.json({});
@@ -1435,7 +1514,12 @@ orgs.post('/:id/groups', async (c) => {
         }
     }
 
-    await logEvent(c.env.DB, 1400, { organizationId: orgId, actingUserId: userId }); // Group_Created
+    await logEvent(c.env.DB, 1400, {
+        organizationId: orgId,
+        actingUserId: userId,
+        groupId,
+        deviceType: getDeviceTypeFromRequest(c),
+    }); // Group_Created
 
     return c.json({
         id: groupId,
@@ -1521,7 +1605,12 @@ orgs.put('/:id/groups/:groupId', async (c) => {
         }
     }
 
-    await logEvent(c.env.DB, 1401, { organizationId: orgId, actingUserId: userId }); // Group_Updated
+    await logEvent(c.env.DB, 1401, {
+        organizationId: orgId,
+        actingUserId: userId,
+        groupId,
+        deviceType: getDeviceTypeFromRequest(c),
+    }); // Group_Updated
 
     return c.json({
         id: group.id,
@@ -1622,7 +1711,12 @@ orgs.delete('/:id/groups/:groupId', async (c) => {
     await db.delete(collectionGroups).where(eq(collectionGroups.groupId, groupId));
     await db.delete(groups).where(eq(groups.id, groupId));
 
-    await logEvent(c.env.DB, 1402, { organizationId: orgId, actingUserId: userId }); // Group_Deleted
+    await logEvent(c.env.DB, 1402, {
+        organizationId: orgId,
+        actingUserId: userId,
+        groupId,
+        deviceType: getDeviceTypeFromRequest(c),
+    }); // Group_Deleted
 
     return c.json({}, 200);
 });
