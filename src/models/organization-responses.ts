@@ -6,6 +6,28 @@
  * - OrganizationUserDetailsResponseModel
  */
 
+/** 将 DB 的 0/1 或 boolean 转为 JSON 布尔，避免 iOS Swift Decodable 解析失败 */
+function toJsonBool(v: unknown, defaultWhenNull = false): boolean {
+    if (v === true || v === 1) return true;
+    if (v === false || v === 0) return false;
+    return defaultWhenNull;
+}
+
+/** iOS Permissions 仅包含 managePolicies、manageResetPassword，缺一会导致 DecodingError.keyNotFound */
+function toProfilePermissions(permissionsJson: string | null | undefined): { managePolicies: boolean; manageResetPassword: boolean } | null {
+    if (permissionsJson == null || permissionsJson === '') return null;
+    try {
+        const p = typeof permissionsJson === 'string' ? JSON.parse(permissionsJson) : permissionsJson;
+        if (p == null || typeof p !== 'object') return null;
+        return {
+            managePolicies: toJsonBool(p.managePolicies),
+            manageResetPassword: toJsonBool(p.manageResetPassword),
+        };
+    } catch {
+        return null;
+    }
+}
+
 /**
  * OrganizationResponseModel - GET/POST/PUT /organizations/{id}
  * 对应官方 Api/AdminConsole/Models/Response/Organizations/OrganizationResponseModel.cs
@@ -78,36 +100,34 @@ export function toProfileOrganizationResponse(org: any, orgUser: any) {
         key: orgUser.key ?? null,
         status: orgUser.status,
         type: orgUser.type,
-        enabled: org.enabled ?? true,
+        enabled: toJsonBool(org.enabled, true),
         // productTierType: 对应 PlanType.GetProductTier()
-        // 0=Free->0, 1=PersonalAnnual->0, ...
-        // 简化映射: Free=0, Families=1, Teams=2, Enterprise=3
         productTierType: getProductTierType(planType),
         planProductType: planType,
-        usePolicies: org.usePolicies ?? false,
-        useSso: org.useSso ?? false,
-        useKeyConnector: org.useKeyConnector ?? false,
-        useScim: org.useScim ?? false,
-        useGroups: org.useGroups ?? false,
-        useDirectory: org.useDirectory ?? false,
-        useEvents: org.useEvents ?? true,
-        useTotp: org.useTotp ?? true,
-        use2fa: org.use2fa ?? true,
-        useApi: org.useApi ?? true,
-        useResetPassword: org.useResetPassword ?? false,
-        useSecretsManager: org.useSecretsManager ?? false,
-        usePasswordManager: org.usePasswordManager ?? true,
-        usersGetPremium: org.usersGetPremium ?? true,
-        useCustomPermissions: org.useCustomPermissions ?? false,
-        useActivateAutofillPolicy: getProductTierType(planType) === 3, // Enterprise only
-        useRiskInsights: org.useRiskInsights ?? false,
-        useOrganizationDomains: org.useOrganizationDomains ?? false,
-        useAdminSponsoredFamilies: org.useAdminSponsoredFamilies ?? false,
-        useAutomaticUserConfirmation: org.useAutomaticUserConfirmation ?? false,
-        useDisableSMAdsForUsers: org.useDisableSmAdsForUsers ?? false,
-        usePhishingBlocker: org.usePhishingBlocker ?? false,
-        useMyItems: org.useMyItems ?? true,
-        selfHost: org.selfHost ?? true,
+        usePolicies: toJsonBool(org.usePolicies),
+        useSso: toJsonBool(org.useSso),
+        useKeyConnector: toJsonBool(org.useKeyConnector),
+        useScim: toJsonBool(org.useScim),
+        useGroups: toJsonBool(org.useGroups),
+        useDirectory: toJsonBool(org.useDirectory),
+        useEvents: toJsonBool(org.useEvents, true),
+        useTotp: toJsonBool(org.useTotp, true),
+        use2fa: toJsonBool(org.use2fa, true),
+        useApi: toJsonBool(org.useApi, true),
+        useResetPassword: toJsonBool(org.useResetPassword),
+        useSecretsManager: toJsonBool(org.useSecretsManager),
+        usePasswordManager: toJsonBool(org.usePasswordManager, true),
+        usersGetPremium: toJsonBool(org.usersGetPremium, true),
+        useCustomPermissions: toJsonBool(org.useCustomPermissions),
+        useActivateAutofillPolicy: getProductTierType(planType) === 3,
+        useRiskInsights: toJsonBool(org.useRiskInsights),
+        useOrganizationDomains: toJsonBool(org.useOrganizationDomains),
+        useAdminSponsoredFamilies: toJsonBool(org.useAdminSponsoredFamilies),
+        useAutomaticUserConfirmation: toJsonBool(org.useAutomaticUserConfirmation),
+        useDisableSMAdsForUsers: toJsonBool(org.useDisableSmAdsForUsers),
+        usePhishingBlocker: toJsonBool(org.usePhishingBlocker),
+        useMyItems: toJsonBool(org.useMyItems, true),
+        selfHost: toJsonBool(org.selfHost, true),
         seats: org.seats ?? null,
         maxCollections: org.maxCollections ?? null,
         maxStorageGb: org.maxStorageGb ?? null,
@@ -117,7 +137,7 @@ export function toProfileOrganizationResponse(org: any, orgUser: any) {
         keyConnectorEnabled: false,
         keyConnectorUrl: null,
         ssoMemberDecryptionType: null,
-        resetPasswordEnrolled: !!(orgUser.resetPasswordKey),
+        resetPasswordEnrolled: toJsonBool(orgUser.resetPasswordKey),
         organizationUserId: orgUser.id,
         providerId: null,
         providerName: null,
@@ -130,12 +150,12 @@ export function toProfileOrganizationResponse(org: any, orgUser: any) {
         userIsClaimedByOrganization: false,
         userIsManagedByOrganization: false,
         isAdminInitiated: false,
-        accessSecretsManager: orgUser.accessSecretsManager ?? false,
-        limitCollectionCreation: org.limitCollectionCreation ?? false,
-        limitCollectionDeletion: org.limitCollectionDeletion ?? false,
-        limitItemDeletion: org.limitItemDeletion ?? false,
-        allowAdminAccessToAllCollectionItems: org.allowAdminAccessToAllCollectionItems ?? true,
-        permissions: orgUser.permissions ? JSON.parse(orgUser.permissions) : null,
+        accessSecretsManager: toJsonBool(orgUser.accessSecretsManager),
+        limitCollectionCreation: toJsonBool(org.limitCollectionCreation),
+        limitCollectionDeletion: toJsonBool(org.limitCollectionDeletion),
+        limitItemDeletion: toJsonBool(org.limitItemDeletion),
+        allowAdminAccessToAllCollectionItems: toJsonBool(org.allowAdminAccessToAllCollectionItems, true),
+        permissions: toProfilePermissions(orgUser.permissions),
         object: 'profileOrganization',
     };
 }
@@ -151,9 +171,9 @@ export function toOrganizationUserResponse(orgUser: any, user?: any) {
         type: orgUser.type,
         status: orgUser.status,
         externalId: orgUser.externalId ?? null,
-        accessSecretsManager: orgUser.accessSecretsManager ?? false,
-        permissions: orgUser.permissions ? JSON.parse(orgUser.permissions) : null,
-        resetPasswordEnrolled: !!(orgUser.resetPasswordKey),
+        accessSecretsManager: toJsonBool(orgUser.accessSecretsManager),
+        permissions: toProfilePermissions(orgUser.permissions),
+        resetPasswordEnrolled: toJsonBool(orgUser.resetPasswordKey),
         usesKeyConnector: false,
         hasMasterPassword: true,
         // user info (when joined with user table)

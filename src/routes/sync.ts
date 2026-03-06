@@ -21,6 +21,13 @@ const sync = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
 sync.use('/*', authMiddleware);
 
+/** 将 DB 的 0/1 转为 JSON 布尔，避免 iOS Swift Decodable 解析失败 */
+function toJsonBool(v: unknown, defaultWhenNull = false): boolean {
+    if (v === true || v === 1) return true;
+    if (v === false || v === 0) return false;
+    return defaultWhenNull;
+}
+
 // Bitwarden 内置的全局等价域名（简化版）
 const GLOBAL_EQUIVALENT_DOMAINS: GlobalEquivalentDomain[] = [
     { type: 0, domains: ['youtube.com', 'google.com', 'gmail.com'], excluded: false },
@@ -79,13 +86,13 @@ sync.get('/', async (c) => {
 
     // 构建 profile - 对应 ProfileResponseModel
     const globalPremium = String(c.env.GLOBAL_PREMIUM).toLowerCase() === 'true';
-    const hasPremiumPersonally = user.premium || globalPremium;
+    const hasPremiumPersonally = toJsonBool(user.premium) || globalPremium;
 
     const profile: ProfileResponse = {
         id: user.id,
         name: user.name,
         email: user.email,
-        emailVerified: user.emailVerified,
+        emailVerified: toJsonBool(user.emailVerified),
         premium: hasPremiumPersonally,
         premiumFromOrganization: false, // 会在组织查询后更新
         masterPasswordHint: user.masterPasswordHint,
@@ -95,8 +102,8 @@ sync.get('/', async (c) => {
         privateKey: user.privateKey,
         accountKeys,
         securityStamp: user.securityStamp,
-        forcePasswordReset: user.forcePasswordReset,
-        usesKeyConnector: user.usesKeyConnector,
+        forcePasswordReset: toJsonBool(user.forcePasswordReset),
+        usesKeyConnector: toJsonBool(user.usesKeyConnector),
         avatarColor: user.avatarColor,
         creationDate: user.creationDate,
         verifyDevices: true,
@@ -145,7 +152,8 @@ sync.get('/', async (c) => {
         v2UpgradeToken: null,
     };
 
-    // 获取组织信息
+    // 获取组织信息（仅 Confirmed 状态，与官方 SyncController.Get 一致）
+    // Invited(0)/Accepted(1) 用户不参与 sync，避免客户端解析到缺少 key 等字段的 org 报错
     const orgsData = await db
         .select({
             org: organizations,
@@ -153,7 +161,7 @@ sync.get('/', async (c) => {
         })
         .from(organizationUsers)
         .innerJoin(organizations, eq(organizations.id, organizationUsers.organizationId))
-        .where(eq(organizationUsers.userId, userId))
+        .where(and(eq(organizationUsers.userId, userId), eq(organizationUsers.status, 2)))
         .all();
 
     const profileOrganizations = orgsData.map(d => toProfileOrganizationResponse(d.org, d.orgUser));
@@ -205,11 +213,11 @@ sync.get('/', async (c) => {
 
     profile.organizations = profileOrganizations;
 
-    // 更新 premiumFromOrganization: 如果任何启用的组织授予 premium
+    // 更新 premiumFromOrganization: 如果任何启用的组织授予 premium（保持 JSON 布尔）
     const premiumFromOrg = profileOrganizations.some(o => o.enabled && o.usersGetPremium);
     if (premiumFromOrg) {
         profile.premiumFromOrganization = true;
-        profile.premium = true; // 组织授予的 premium 也算 premium
+        profile.premium = true;
     }
 
     // 构建组织 useTotp 映射 (用于 cipher 的 organizationUseTotp)
@@ -284,7 +292,7 @@ sync.get('/', async (c) => {
             fields: data.fields || null,
             passwordHistory: data.passwordHistory || null,
             attachments: attachmentsList.length > 0 ? attachmentsList : null,
-            organizationUseTotp: cipher.organizationId ? (orgUseTotpMap[cipher.organizationId] ?? false) : false,
+            organizationUseTotp: cipher.organizationId ? toJsonBool(orgUseTotpMap[cipher.organizationId]) : false,
             revisionDate: cipher.revisionDate,
             creationDate: cipher.creationDate,
             deletedDate: cipher.deletedDate,
@@ -326,8 +334,8 @@ sync.get('/', async (c) => {
             expirationDate: send.expirationDate,
             deletionDate: send.deletionDate,
             password: send.password ? 'set' : null,
-            disabled: send.disabled,
-            hideEmail: send.hideEmail,
+            disabled: toJsonBool(send.disabled),
+            hideEmail: toJsonBool(send.hideEmail),
             object: 'send',
         };
 
