@@ -26,7 +26,7 @@ import { BadRequestError, NotFoundError } from '../middleware/error';
 import { generateUuid, createInviteToken, verifyInviteToken } from '../services/crypto';
 import { toOrganizationResponse, toOrganizationSubscriptionResponse, toOrganizationUserResponse } from '../models/organization-responses';
 import type { Bindings, Variables } from '../types';
-import { batchedInArrayQuery } from '../services/db';
+import { batchedInArrayQuery, D1_BATCH_SIZE } from '../services/db';
 
 const orgs = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 orgs.use('/*', authMiddleware);
@@ -61,6 +61,59 @@ async function getOrgUser(db: D1Db, orgId: string, userId: string): Promise<Orga
         throw new NotFoundError('Organization not found or access denied.');
     }
     return orgUser;
+}
+
+/**
+ * 根据 organizationId 批量刷新该组织内所有已确认成员的 AccountRevisionDate
+ * 对应官方 UserBumpAccountRevisionDateByOrganizationId
+ */
+async function bumpAccountRevisionDateByOrganizationId(db: D1Db, orgId: string, now?: string): Promise<void> {
+    const orgUsersRows = await db
+        .select({ userId: organizationUsers.userId })
+        .from(organizationUsers)
+        .where(
+            and(
+                eq(organizationUsers.organizationId, orgId),
+                eq(organizationUsers.status, 2), // Confirmed
+            ),
+        )
+        .all();
+
+    const userIds = Array.from(
+        new Set(
+            orgUsersRows
+                .map((r) => r.userId)
+                .filter((id): id is string => !!id),
+        ),
+    );
+    if (userIds.length === 0) return;
+
+    const timestamp = now ?? new Date().toISOString();
+    for (let i = 0; i < userIds.length; i += D1_BATCH_SIZE) {
+        const batch = userIds.slice(i, i + D1_BATCH_SIZE);
+        await db.update(users).set({ accountRevisionDate: timestamp }).where(inArray(users.id, batch));
+    }
+}
+
+/**
+ * 根据 organizationUserId 刷新对应已确认成员的 AccountRevisionDate
+ * 对应官方 UserBumpAccountRevisionDateByOrganizationUserId
+ */
+async function bumpAccountRevisionDateByOrganizationUserId(db: D1Db, orgUserId: string, now?: string): Promise<void> {
+    const row = await db
+        .select({
+            userId: organizationUsers.userId,
+            status: organizationUsers.status,
+        })
+        .from(organizationUsers)
+        .where(eq(organizationUsers.id, orgUserId))
+        .get();
+
+    // 仅对已绑定用户且状态为 Confirmed 的成员生效
+    if (!row?.userId || row.status !== 2) return;
+
+    const timestamp = now ?? new Date().toISOString();
+    await db.update(users).set({ accountRevisionDate: timestamp }).where(eq(users.id, row.userId));
 }
 
 /**
@@ -388,6 +441,9 @@ orgs.delete('/:id', async (c) => {
     const org = await db.select().from(organizations).where(eq(organizations.id, orgId)).get();
     if (!org) throw new NotFoundError('Organization not found.');
 
+    // 删除组织前，按组织维度刷新所有已确认成员的 AccountRevisionDate
+    await bumpAccountRevisionDateByOrganizationId(db, orgId);
+
     // 官方需要密码验证，这里简化（自建环境信任 Owner）
     // body 中可能有 masterPasswordHash，但我们暂不验证
     await db.delete(organizations).where(eq(organizations.id, orgId));
@@ -410,6 +466,9 @@ orgs.post('/:id/delete', async (c) => {
 
     const org = await db.select().from(organizations).where(eq(organizations.id, orgId)).get();
     if (!org) throw new NotFoundError('Organization not found.');
+
+    // 删除组织前，按组织维度刷新所有已确认成员的 AccountRevisionDate
+    await bumpAccountRevisionDateByOrganizationId(db, orgId);
 
     await db.delete(organizations).where(eq(organizations.id, orgId));
     await logEvent(c.env.DB, 1601, { userId, organizationId: orgId, deviceType: getDeviceTypeFromRequest(c) });
@@ -444,8 +503,13 @@ orgs.post('/:id/leave', async (c) => {
         }
     }
 
+    const now = new Date().toISOString();
+
     await db.delete(organizationUsers).where(eq(organizationUsers.id, orgUser.id));
     await logEvent(c.env.DB, 1504, { userId, organizationId: orgId, deviceType: getDeviceTypeFromRequest(c) });
+
+    // 当前用户离开组织后，需要刷新自己的 AccountRevisionDate 以触发客户端重新同步
+    await db.update(users).set({ accountRevisionDate: now }).where(eq(users.id, userId));
 
     return c.body(null, 200);
 });
@@ -925,6 +989,9 @@ orgs.post('/:id/users/:orgUserId/confirm', async (c) => {
         deviceType: getDeviceTypeFromRequest(c),
     });
 
+    // 用户从 Accepted -> Confirmed，正式获得组织保险库访问权限，需刷新其 AccountRevisionDate
+    await bumpAccountRevisionDateByOrganizationUserId(db, orgUserId, now);
+
     return c.body(null, 200);
 });
 
@@ -968,6 +1035,9 @@ orgs.post('/:id/users/confirm', async (c) => {
             organizationUserId: ouId,
             deviceType: getDeviceTypeFromRequest(c),
         });
+
+        // 批量确认成员时，同样需要为每个成员刷新 AccountRevisionDate
+        await bumpAccountRevisionDateByOrganizationUserId(db, ouId, now);
 
         results.push({ id: ouId, error: '' });
     }
@@ -1093,6 +1163,9 @@ orgs.put('/:id/users/:orgUserId', async (c) => {
         }
     }
 
+    // 成员角色 / 权限 / 集合访问权限变化，会改变其能看到的组织条目，需刷新 AccountRevisionDate
+    await bumpAccountRevisionDateByOrganizationUserId(db, orgUserId, now);
+
     return c.body(null, 200);
 });
 
@@ -1165,6 +1238,8 @@ orgs.delete('/:id/users/:orgUserId', async (c) => {
         throw new BadRequestError('Only owners can remove other owners.');
     }
 
+    const now = new Date().toISOString();
+
     await db.delete(organizationUsers).where(eq(organizationUsers.id, orgUserId));
     await logEvent(c.env.DB, 1503, {
         userId: targetUser.userId || undefined,
@@ -1173,6 +1248,11 @@ orgs.delete('/:id/users/:orgUserId', async (c) => {
         organizationUserId: orgUserId,
         deviceType: getDeviceTypeFromRequest(c),
     });
+
+    // 被移除成员失去组织访问权限，刷新该成员的 AccountRevisionDate
+    if (targetUser.userId) {
+        await db.update(users).set({ accountRevisionDate: now }).where(eq(users.id, targetUser.userId));
+    }
 
     return c.json({});
 });
@@ -1194,6 +1274,8 @@ orgs.post('/:id/users/:orgUserId/remove', async (c) => {
 
     if (!targetUser) throw new NotFoundError('Organization user not found.');
 
+    const now = new Date().toISOString();
+
     await db.delete(organizationUsers).where(eq(organizationUsers.id, orgUserId));
     await logEvent(c.env.DB, 1503, {
         userId: targetUser.userId || undefined,
@@ -1202,6 +1284,10 @@ orgs.post('/:id/users/:orgUserId/remove', async (c) => {
         organizationUserId: orgUserId,
         deviceType: getDeviceTypeFromRequest(c),
     });
+
+    if (targetUser.userId) {
+        await db.update(users).set({ accountRevisionDate: now }).where(eq(users.id, targetUser.userId));
+    }
 
     return c.json({});
 });
@@ -1260,6 +1346,10 @@ orgs.put('/:id/collection-management', async (c) => {
 
     await db.update(organizations).set(updateData).where(eq(organizations.id, orgId));
     const updated = await db.select().from(organizations).where(eq(organizations.id, orgId)).get();
+
+    // 集合管理策略变化会影响组织成员的可见/可操作范围，按组织维度刷新 AccountRevisionDate
+    await bumpAccountRevisionDateByOrganizationId(db, orgId, now);
+
     return c.json(toOrganizationResponse(updated));
 });
 
@@ -1293,6 +1383,9 @@ orgs.post('/:id/collections', async (c) => {
         creationDate: now,
         revisionDate: now,
     });
+
+    // 新建集合会影响组织成员的集合列表，按组织维度刷新 AccountRevisionDate
+    await bumpAccountRevisionDateByOrganizationId(db, orgId, now);
 
     return c.json({
         id: collectionId,
@@ -1393,6 +1486,9 @@ orgs.put('/:id/collections/:collectionId', async (c) => {
     const cuList = await db.select().from(collectionUsers).where(eq(collectionUsers.collectionId, collectionId)).all();
     const cgList = await db.select().from(collectionGroups).where(eq(collectionGroups.collectionId, collectionId)).all();
 
+    // 集合的名称 / externalId / 访问权限发生变化，影响成员可访问内容，按组织维度刷新 AccountRevisionDate
+    await bumpAccountRevisionDateByOrganizationId(db, orgId, now);
+
     return c.json({
         id: collectionId,
         organizationId: orgId,
@@ -1440,6 +1536,9 @@ orgs.delete('/:id/collections/:collectionId', async (c) => {
     await db.delete(collectionCiphers).where(eq(collectionCiphers.collectionId, collectionId));
     await db.delete(collections).where(eq(collections.id, collectionId));
 
+    // 删除单个集合，按组织维度刷新 AccountRevisionDate
+    await bumpAccountRevisionDateByOrganizationId(db, orgId);
+
     return c.json({});
 });
 
@@ -1475,6 +1574,9 @@ orgs.delete('/:id/collections', async (c) => {
         await db.delete(collections).where(eq(collections.id, colId));
     }
 
+    // 批量删除集合，同样刷新组织内所有成员的 AccountRevisionDate
+    await bumpAccountRevisionDateByOrganizationId(db, orgId);
+
     return c.json({});
 });
 
@@ -1509,6 +1611,8 @@ orgs.post('/:id/collections/delete', async (c) => {
         await db.delete(collectionCiphers).where(eq(collectionCiphers.collectionId, colId));
         await db.delete(collections).where(eq(collections.id, colId));
     }
+
+    await bumpAccountRevisionDateByOrganizationId(db, orgId);
 
     return c.json({});
 });
@@ -1693,6 +1797,9 @@ orgs.post('/:id/groups', async (c) => {
         deviceType: getDeviceTypeFromRequest(c),
     }); // Group_Created
 
+    // 新建群组（及其集合/成员关联）会影响成员可访问集合，按组织维度刷新 AccountRevisionDate
+    await bumpAccountRevisionDateByOrganizationId(db, orgId, now);
+
     return c.json({
         id: groupId,
         organizationId: orgId,
@@ -1783,6 +1890,9 @@ orgs.put('/:id/groups/:groupId', async (c) => {
         groupId,
         deviceType: getDeviceTypeFromRequest(c),
     }); // Group_Updated
+
+    // 群组的集合/成员变更会影响访问控制，按组织维度刷新 AccountRevisionDate
+    await bumpAccountRevisionDateByOrganizationId(db, orgId, now);
 
     return c.json({
         id: group.id,
@@ -1889,6 +1999,9 @@ orgs.delete('/:id/groups/:groupId', async (c) => {
         groupId,
         deviceType: getDeviceTypeFromRequest(c),
     }); // Group_Deleted
+
+    // 删除群组影响集合访问关系，按组织维度刷新 AccountRevisionDate
+    await bumpAccountRevisionDateByOrganizationId(db, orgId);
 
     return c.json({}, 200);
 });

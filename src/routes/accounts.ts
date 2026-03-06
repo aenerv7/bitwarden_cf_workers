@@ -257,13 +257,16 @@ accounts.get('/revision-date', async (c) => {
     const userId = c.get('userId');
 
     const user = await db.select({ accountRevisionDate: users.accountRevisionDate })
-        .from(users).where(eq(users.id, userId)).get();
+        .from(users)
+        .where(eq(users.id, userId))
+        .get();
 
-    if (!user) {
-        throw new NotFoundError('User not found.');
+    // 官方实现：如果无法获取用户或修订时间，返回 200 + null（long?）
+    if (!user || !user.accountRevisionDate) {
+        return c.json(null);
     }
 
-    // Bitwarden 返回毫秒时间戳
+    // Bitwarden 返回毫秒时间戳（epoch ms）
     return c.json(new Date(user.accountRevisionDate).getTime());
 });
 
