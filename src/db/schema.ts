@@ -139,20 +139,67 @@ export const sends = sqliteTable('sends', {
 ]);
 
 // ==================== Organizations ====================
+// 对应 Core/AdminConsole/Entities/Organization.cs
 export const organizations = sqliteTable('organizations', {
     id: text('id').primaryKey(),
+    identifier: text('identifier'), // 组织标识符，用于 SSO
     name: text('name').notNull(),
+    businessName: text('business_name'),
+    businessAddress1: text('business_address1'),
+    businessAddress2: text('business_address2'),
+    businessAddress3: text('business_address3'),
+    businessCountry: text('business_country'),
+    businessTaxNumber: text('business_tax_number'),
     billingEmail: text('billing_email').notNull(),
     email: text('email'),
-    key: text('key'), // 加密密钥
-    planType: integer('plan_type').default(0), // 0=Free, 1=Premium, 2=Family/Teams
+    plan: text('plan').default('Free'),
+    planType: integer('plan_type').default(0),
     seats: integer('seats').default(5),
+    maxCollections: integer('max_collections'),
     maxStorageGb: integer('max_storage_gb').default(1),
-    useTotp: integer('use_totp', { mode: 'boolean' }).default(false),
-    useWebAuthn: integer('use_web_authn', { mode: 'boolean' }).default(false),
+    maxAutoscaleSeats: integer('max_autoscale_seats'),
+    // 功能开关 - 对应官方 Organization 实体的 use* 字段
+    usePolicies: integer('use_policies', { mode: 'boolean' }).default(false),
+    useSso: integer('use_sso', { mode: 'boolean' }).default(false),
+    useKeyConnector: integer('use_key_connector', { mode: 'boolean' }).default(false),
+    useScim: integer('use_scim', { mode: 'boolean' }).default(false),
+    useGroups: integer('use_groups', { mode: 'boolean' }).default(false),
+    useDirectory: integer('use_directory', { mode: 'boolean' }).default(false),
+    useEvents: integer('use_events', { mode: 'boolean' }).default(true),
+    useTotp: integer('use_totp', { mode: 'boolean' }).default(true),
+    use2fa: integer('use_2fa', { mode: 'boolean' }).default(true),
+    useApi: integer('use_api', { mode: 'boolean' }).default(true),
+    useResetPassword: integer('use_reset_password', { mode: 'boolean' }).default(false),
+    useSecretsManager: integer('use_secrets_manager', { mode: 'boolean' }).default(false),
+    selfHost: integer('self_host', { mode: 'boolean' }).default(true),
+    usersGetPremium: integer('users_get_premium', { mode: 'boolean' }).default(true),
+    useCustomPermissions: integer('use_custom_permissions', { mode: 'boolean' }).default(false),
+    usePasswordManager: integer('use_password_manager', { mode: 'boolean' }).default(true),
+    useRiskInsights: integer('use_risk_insights', { mode: 'boolean' }).default(false),
+    useOrganizationDomains: integer('use_organization_domains', { mode: 'boolean' }).default(false),
+    useAdminSponsoredFamilies: integer('use_admin_sponsored_families', { mode: 'boolean' }).default(false),
+    useAutomaticUserConfirmation: integer('use_automatic_user_confirmation', { mode: 'boolean' }).default(false),
+    useDisableSmAdsForUsers: integer('use_disable_sm_ads_for_users', { mode: 'boolean' }).default(false),
+    usePhishingBlocker: integer('use_phishing_blocker', { mode: 'boolean' }).default(false),
+    useMyItems: integer('use_my_items', { mode: 'boolean' }).default(true),
+    // 集合管理设置
+    limitCollectionCreation: integer('limit_collection_creation', { mode: 'boolean' }).default(false),
+    limitCollectionDeletion: integer('limit_collection_deletion', { mode: 'boolean' }).default(false),
+    limitItemDeletion: integer('limit_item_deletion', { mode: 'boolean' }).default(false),
+    allowAdminAccessToAllCollectionItems: integer('allow_admin_access_to_all_collection_items', { mode: 'boolean' }).default(true),
+    // Secrets Manager
+    smSeats: integer('sm_seats'),
+    smServiceAccounts: integer('sm_service_accounts'),
+    maxAutoscaleSmSeats: integer('max_autoscale_sm_seats'),
+    maxAutoscaleSmServiceAccounts: integer('max_autoscale_sm_service_accounts'),
+    // 密钥 & 状态
+    storage: integer('storage'), // bytes
     enabled: integer('enabled', { mode: 'boolean' }).default(true),
     publicKey: text('public_key'),
     privateKey: text('private_key'),
+    twoFactorProviders: text('two_factor_providers'), // JSON
+    expirationDate: text('expiration_date'),
+    licenseKey: text('license_key'),
     creationDate: text('creation_date').notNull(),
     revisionDate: text('revision_date').notNull(),
 });
@@ -192,15 +239,19 @@ export const events = sqliteTable('events', {
 });
 
 // ==================== Organization Users ====================
+// 对应 Core/Entities/OrganizationUser.cs
 export const organizationUsers = sqliteTable('organization_users', {
     id: text('id').primaryKey(),
     organizationId: text('organization_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
     userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
     email: text('email').notNull(),
     key: text('key'), // 加密的 org key
+    resetPasswordKey: text('reset_password_key'), // 密码重置密钥
     status: integer('status').notNull().default(2), // 0=Invited,1=Accepted,2=Confirmed,3=Revoked
     type: integer('type').notNull().default(2), // 0=Owner,1=Admin,2=User,3=Manager,4=Custom
     permissions: text('permissions'), // JSON - 权限控制
+    externalId: text('external_id'), // SSO external ID
+    accessSecretsManager: integer('access_secrets_manager', { mode: 'boolean' }).default(false),
     creationDate: text('creation_date').notNull(),
     revisionDate: text('revision_date').notNull(),
 }, (table) => [
@@ -239,6 +290,42 @@ export const collectionUsers = sqliteTable('collection_users', {
 }, (table) => [
     primaryKey({ columns: [table.collectionId, table.organizationUserId] }),
     index('idx_coll_users_org_user_id').on(table.organizationUserId),
+]);
+
+// ==================== Groups ====================
+// 对应 Core/AdminConsole/Entities/Group.cs
+export const groups = sqliteTable('groups', {
+    id: text('id').primaryKey(),
+    organizationId: text('organization_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    externalId: text('external_id'),
+    creationDate: text('creation_date').notNull(),
+    revisionDate: text('revision_date').notNull(),
+}, (table) => [
+    index('idx_groups_org_id').on(table.organizationId),
+]);
+
+// ==================== Group Users ====================
+// 对应 Core/AdminConsole/Entities/GroupUser.cs
+export const groupUsers = sqliteTable('group_users', {
+    groupId: text('group_id').notNull().references(() => groups.id, { onDelete: 'cascade' }),
+    organizationUserId: text('organization_user_id').notNull().references(() => organizationUsers.id, { onDelete: 'cascade' }),
+}, (table) => [
+    primaryKey({ columns: [table.groupId, table.organizationUserId] }),
+    index('idx_group_users_org_user_id').on(table.organizationUserId),
+]);
+
+// ==================== Collection Groups ====================
+// 对应 Core/Entities/CollectionGroup.cs
+export const collectionGroups = sqliteTable('collection_groups', {
+    collectionId: text('collection_id').notNull().references(() => collections.id, { onDelete: 'cascade' }),
+    groupId: text('group_id').notNull().references(() => groups.id, { onDelete: 'cascade' }),
+    readOnly: integer('read_only', { mode: 'boolean' }).default(false),
+    hidePasswords: integer('hide_passwords', { mode: 'boolean' }).default(false),
+    manage: integer('manage', { mode: 'boolean' }).default(false),
+}, (table) => [
+    primaryKey({ columns: [table.collectionId, table.groupId] }),
+    index('idx_collection_groups_group_id').on(table.groupId),
 ]);
 
 // ==================== Auth Requests ====================

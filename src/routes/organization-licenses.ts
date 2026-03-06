@@ -23,6 +23,7 @@ import {
 import { authMiddleware } from '../middleware/auth';
 import { BadRequestError, NotFoundError } from '../middleware/error';
 import { generateUuid } from '../services/crypto';
+import { toOrganizationResponse } from '../models/organization-responses';
 import type { Bindings, Variables } from '../types';
 
 type AppEnv = { Bindings: Bindings; Variables: Variables };
@@ -79,7 +80,6 @@ async function extractLicenseFile(
  */
 function mapLicenseToOrganizationFields(license: unknown) {
     const lic = license as Record<string, unknown>;
-    // 组织名称：优先使用 Name，其次 BusinessName，兜底一个固定值避免为空
     const name: string =
         (lic?.Name as string | undefined) ||
         (lic?.OrganizationName as string | undefined) ||
@@ -95,35 +95,66 @@ function mapLicenseToOrganizationFields(license: unknown) {
         throw new BadRequestError('Invalid license: missing billing email.');
     }
 
-    //  seats / storage 只是近似，主要保证客户端显示正常
     const seats = typeof lic?.Seats === 'number' ? (lic.Seats as number) : 5;
     const maxStorageGb =
         typeof lic?.MaxStorageGb === 'number' ? (lic.MaxStorageGb as number) : 1;
+    const maxCollections =
+        typeof lic?.MaxCollections === 'number' ? (lic.MaxCollections as number) : null;
 
-    // planType 在官方服务端是枚举，这里只区分 Free / 非 Free，非 Free 统一当作 1（付费）
     let planType = 0;
     if (lic?.PlanType != null) {
-        // 如果 license 自身有枚举值，直接使用
         planType = Number(lic.PlanType) || 0;
     } else if (typeof lic?.Plan === 'string') {
         const plan = (lic.Plan as string).toLowerCase();
-        if (
-            plan.includes('teams') ||
-            plan.includes('enterprise') ||
-            plan.includes('business') ||
-            plan.includes('family') ||
-            plan.includes('families')
-        ) {
+        if (plan.includes('teams') || plan.includes('enterprise') ||
+            plan.includes('business') || plan.includes('family') || plan.includes('families')) {
             planType = 2;
         } else if (!plan.includes('free')) {
             planType = 1;
         }
     }
 
-    const useTotp = !!lic?.UseTotp;
-    const enabled = lic?.Enabled !== false;
+    const boolField = (key: string, def: boolean) =>
+        typeof lic?.[key] === 'boolean' ? (lic[key] as boolean) : def;
 
-    return { name, billingEmail, seats, maxStorageGb, planType, useTotp, enabled };
+    return {
+        name,
+        businessName: (lic?.BusinessName as string) ?? null,
+        billingEmail,
+        plan: (lic?.Plan as string) ?? 'Free',
+        planType,
+        seats,
+        maxCollections,
+        maxStorageGb,
+        enabled: lic?.Enabled !== false,
+        // 从 license 中提取所有 use* 功能开关
+        usePolicies: boolField('UsePolicies', false),
+        useSso: boolField('UseSso', false),
+        useKeyConnector: boolField('UseKeyConnector', false),
+        useScim: boolField('UseScim', false),
+        useGroups: boolField('UseGroups', false),
+        useDirectory: boolField('UseDirectory', false),
+        useEvents: boolField('UseEvents', true),
+        useTotp: boolField('UseTotp', true),
+        use2fa: boolField('Use2fa', true),
+        useApi: boolField('UseApi', true),
+        useResetPassword: boolField('UseResetPassword', false),
+        useSecretsManager: boolField('UseSecretsManager', false),
+        selfHost: boolField('SelfHost', true),
+        usersGetPremium: boolField('UsersGetPremium', true),
+        useCustomPermissions: boolField('UseCustomPermissions', false),
+        usePasswordManager: boolField('UsePasswordManager', true),
+        useRiskInsights: boolField('UseRiskInsights', false),
+        useOrganizationDomains: boolField('UseOrganizationDomains', false),
+        useAdminSponsoredFamilies: boolField('UseAdminSponsoredFamilies', false),
+        useAutomaticUserConfirmation: boolField('UseAutomaticUserConfirmation', false),
+        useDisableSmAdsForUsers: boolField('UseDisableSmAdsForUsers', false),
+        usePhishingBlocker: boolField('UsePhishingBlocker', false),
+        useMyItems: boolField('UseMyItems', true),
+        // Secrets Manager
+        smSeats: typeof lic?.SmSeats === 'number' ? (lic.SmSeats as number) : null,
+        smServiceAccounts: typeof lic?.SmServiceAccounts === 'number' ? (lic.SmServiceAccounts as number) : null,
+    };
 }
 
 /**
@@ -275,15 +306,7 @@ orgLicenses.post('/self-hosted', async (c) => {
     // 校验 license 合法性，尽量与官方行为保持一致
     validateOrganizationLicense(licenseJson, c.env);
 
-    const {
-        name,
-        billingEmail,
-        seats,
-        maxStorageGb,
-        planType,
-        useTotp,
-        enabled,
-    } = mapLicenseToOrganizationFields(licenseJson);
+    const orgFields = mapLicenseToOrganizationFields(licenseJson);
 
     const { licenseKey, issued, expires, selfHost, installationId, licenseOrgId } =
         extractLicensePersistenceFields(licenseJson);
@@ -298,28 +321,52 @@ orgLicenses.post('/self-hosted', async (c) => {
         .get();
 
     if (existingLicense) {
-        // 与官方错误文本保持一致
         throw new BadRequestError('License is already in use by another organization.');
     }
 
     const now = new Date().toISOString();
-    // 为了与官方保持一致，如果 license 中自带 Id（云端组织 Id），则直接使用；
-    // 否则退化为本地生成的 UUID。
     const orgId = licenseOrgId || generateUuid();
 
-    // 创建组织记录
+    // 创建组织记录（包含所有 license 中的功能开关）
     await db.insert(organizations).values({
         id: orgId,
-        name,
-        billingEmail,
-        email: billingEmail,
-        key: null,
-        planType,
-        seats,
-        maxStorageGb,
-        useTotp,
-        useWebAuthn: false,
-        enabled,
+        name: orgFields.name,
+        businessName: orgFields.businessName,
+        billingEmail: orgFields.billingEmail,
+        email: orgFields.billingEmail,
+        plan: orgFields.plan,
+        planType: orgFields.planType,
+        seats: orgFields.seats,
+        maxCollections: orgFields.maxCollections,
+        maxStorageGb: orgFields.maxStorageGb,
+        enabled: orgFields.enabled,
+        usePolicies: orgFields.usePolicies,
+        useSso: orgFields.useSso,
+        useKeyConnector: orgFields.useKeyConnector,
+        useScim: orgFields.useScim,
+        useGroups: orgFields.useGroups,
+        useDirectory: orgFields.useDirectory,
+        useEvents: orgFields.useEvents,
+        useTotp: orgFields.useTotp,
+        use2fa: orgFields.use2fa,
+        useApi: orgFields.useApi,
+        useResetPassword: orgFields.useResetPassword,
+        useSecretsManager: orgFields.useSecretsManager,
+        selfHost: orgFields.selfHost,
+        usersGetPremium: orgFields.usersGetPremium,
+        useCustomPermissions: orgFields.useCustomPermissions,
+        usePasswordManager: orgFields.usePasswordManager,
+        useRiskInsights: orgFields.useRiskInsights,
+        useOrganizationDomains: orgFields.useOrganizationDomains,
+        useAdminSponsoredFamilies: orgFields.useAdminSponsoredFamilies,
+        useAutomaticUserConfirmation: orgFields.useAutomaticUserConfirmation,
+        useDisableSmAdsForUsers: orgFields.useDisableSmAdsForUsers,
+        usePhishingBlocker: orgFields.usePhishingBlocker,
+        useMyItems: orgFields.useMyItems,
+        smSeats: orgFields.smSeats,
+        smServiceAccounts: orgFields.smServiceAccounts,
+        licenseKey,
+        expirationDate: expires,
         creationDate: now,
         revisionDate: now,
     });
@@ -373,21 +420,8 @@ orgLicenses.post('/self-hosted', async (c) => {
         });
     }
 
-    // 目前不保存 license 文件本身（官方存到磁盘 /organization 目录），
-    // 如需对齐可以后续扩展为存入 R2/KV。
-
-    return c.json({
-        id: orgId,
-        name,
-        billingEmail,
-        planType,
-        seats,
-        maxStorageGb,
-        enabled,
-        useTotp,
-        useWebAuthn: false,
-        object: 'organization',
-    });
+    const org = await db.select().from(organizations).where(eq(organizations.id, orgId)).get();
+    return c.json(toOrganizationResponse(org));
 });
 
 /**
@@ -418,15 +452,7 @@ orgLicenses.post('/self-hosted/:id', async (c) => {
     // 确认 license 属于当前组织（如包含 Id）
     validateLicenseMatchesOrganization(licenseJson, orgId);
 
-    const {
-        name,
-        billingEmail,
-        seats,
-        maxStorageGb,
-        planType,
-        useTotp,
-        enabled,
-    } = mapLicenseToOrganizationFields(licenseJson);
+    const orgFields = mapLicenseToOrganizationFields(licenseJson);
 
     const { licenseKey, issued, expires, selfHost, installationId } =
         extractLicensePersistenceFields(licenseJson);
@@ -436,14 +462,43 @@ orgLicenses.post('/self-hosted/:id', async (c) => {
     await db
         .update(organizations)
         .set({
-            name,
-            billingEmail,
-            email: billingEmail,
-            planType,
-            seats,
-            maxStorageGb,
-            useTotp,
-            enabled,
+            name: orgFields.name,
+            businessName: orgFields.businessName,
+            billingEmail: orgFields.billingEmail,
+            email: orgFields.billingEmail,
+            plan: orgFields.plan,
+            planType: orgFields.planType,
+            seats: orgFields.seats,
+            maxCollections: orgFields.maxCollections,
+            maxStorageGb: orgFields.maxStorageGb,
+            enabled: orgFields.enabled,
+            usePolicies: orgFields.usePolicies,
+            useSso: orgFields.useSso,
+            useKeyConnector: orgFields.useKeyConnector,
+            useScim: orgFields.useScim,
+            useGroups: orgFields.useGroups,
+            useDirectory: orgFields.useDirectory,
+            useEvents: orgFields.useEvents,
+            useTotp: orgFields.useTotp,
+            use2fa: orgFields.use2fa,
+            useApi: orgFields.useApi,
+            useResetPassword: orgFields.useResetPassword,
+            useSecretsManager: orgFields.useSecretsManager,
+            selfHost: orgFields.selfHost,
+            usersGetPremium: orgFields.usersGetPremium,
+            useCustomPermissions: orgFields.useCustomPermissions,
+            usePasswordManager: orgFields.usePasswordManager,
+            useRiskInsights: orgFields.useRiskInsights,
+            useOrganizationDomains: orgFields.useOrganizationDomains,
+            useAdminSponsoredFamilies: orgFields.useAdminSponsoredFamilies,
+            useAutomaticUserConfirmation: orgFields.useAutomaticUserConfirmation,
+            useDisableSmAdsForUsers: orgFields.useDisableSmAdsForUsers,
+            usePhishingBlocker: orgFields.usePhishingBlocker,
+            useMyItems: orgFields.useMyItems,
+            smSeats: orgFields.smSeats,
+            smServiceAccounts: orgFields.smServiceAccounts,
+            licenseKey,
+            expirationDate: expires,
             revisionDate: now,
         })
         .where(eq(organizations.id, orgId));

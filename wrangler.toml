@@ -8,6 +8,10 @@ JWT_SECRET = "change-me-in-production"
 JWT_EXPIRATION = "3600"
 JWT_REFRESH_EXPIRATION = "2592000"
 GLOBAL_PREMIUM = "true"
+# 邀请链接中的 Web Vault 地址，例如 https://vault.example.com 或 http://localhost:8080（本地开发）
+# VAULT_BASE_URL = "http://localhost:8080"
+# 设为 "true" 时，邀请链接一律进入「注册」页，被邀请人需设置主密钥（适合自建、该邮箱尚未注册或希望走注册流程）
+# FORCE_INVITE_REGISTER = "true"
 
 [[d1_databases]]
 binding = "DB"

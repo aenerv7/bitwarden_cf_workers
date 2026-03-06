@@ -126,6 +126,97 @@ export async function sha256(data: string): Promise<string> {
     return uint8ArrayToBase64(new Uint8Array(hashBuffer));
 }
 
+// ---- 组织邀请 Token（5 天有效，与官方 OrgUserInviteTokenable 行为一致） ----
+
+const INVITE_TOKEN_LIFETIME_SEC = 5 * 24 * 3600; // 5 days
+
+function base64urlEncode(bytes: Uint8Array): string {
+    let binary = '';
+    for (const byte of bytes) {
+        binary += String.fromCharCode(byte);
+    }
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function base64urlDecode(str: string): Uint8Array {
+    let s = str.replace(/-/g, '+').replace(/_/g, '/');
+    const pad = s.length % 4;
+    if (pad) s += '='.repeat(4 - pad);
+    const binary = atob(s);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+}
+
+/**
+ * 生成组织邀请 Token（HMAC-SHA256 签名，payload 含 orgUserId, email, orgId, exp）
+ */
+export async function createInviteToken(
+    orgUserId: string,
+    email: string,
+    orgId: string,
+    secret: string
+): Promise<string> {
+    const exp = Math.floor(Date.now() / 1000) + INVITE_TOKEN_LIFETIME_SEC;
+    const payload = JSON.stringify({ o: orgUserId, e: email.toLowerCase(), r: orgId, exp });
+    const payloadBytes = new TextEncoder().encode(payload);
+    const payloadB64 = base64urlEncode(new Uint8Array(payloadBytes));
+
+    const key = await crypto.subtle.importKey(
+        'raw',
+        new TextEncoder().encode(secret),
+        { name: 'HMAC', hash: 'SHA-256' },
+        false,
+        ['sign']
+    );
+    const sig = await crypto.subtle.sign(
+        'HMAC',
+        key,
+        new TextEncoder().encode(payloadB64)
+    );
+    const sigB64 = base64urlEncode(new Uint8Array(sig));
+    return `${payloadB64}.${sigB64}`;
+}
+
+/**
+ * 校验组织邀请 Token，成功返回 { orgUserId, email, orgId }，失败返回 null
+ */
+export async function verifyInviteToken(
+    token: string,
+    secret: string
+): Promise<{ orgUserId: string; email: string; orgId: string } | null> {
+    const dot = token.indexOf('.');
+    if (dot <= 0) return null;
+    const payloadB64 = token.slice(0, dot);
+    const sigB64 = token.slice(dot + 1);
+
+    const key = await crypto.subtle.importKey(
+        'raw',
+        new TextEncoder().encode(secret),
+        { name: 'HMAC', hash: 'SHA-256' },
+        false,
+        ['verify']
+    );
+    const sig = base64urlDecode(sigB64);
+    const valid = await crypto.subtle.verify(
+        'HMAC',
+        key,
+        sig,
+        new TextEncoder().encode(payloadB64)
+    );
+    if (!valid) return null;
+
+    try {
+        const payloadBytes = base64urlDecode(payloadB64);
+        const payload = JSON.parse(new TextDecoder().decode(payloadBytes)) as { o?: string; e?: string; r?: string; exp?: number };
+        if (!payload.o || !payload.e || !payload.r || typeof payload.exp !== 'number') return null;
+        if (payload.exp < Math.floor(Date.now() / 1000)) return null; // expired
+        return { orgUserId: payload.o, email: payload.e, orgId: payload.r };
+    } catch {
+        return null;
+    }
+}
+
 // ---- 工具函数 ----
 
 function uint8ArrayToBase64(bytes: Uint8Array): string {

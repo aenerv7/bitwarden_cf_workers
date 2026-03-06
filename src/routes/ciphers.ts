@@ -7,7 +7,7 @@
 import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq, and, desc, isNull, isNotNull, inArray } from 'drizzle-orm';
-import { users, ciphers, folders, collectionCiphers, events, organizationUsers } from '../db/schema';
+import { users, ciphers, folders, collectionCiphers, collections, events, organizationUsers } from '../db/schema';
 import { authMiddleware } from '../middleware/auth';
 import { logEvent } from '../services/events';
 import { toEventResponse } from './events';
@@ -706,6 +706,64 @@ ciphersRoute.post('/create', async (c) => {
 
     const created = await db.select().from(ciphers).where(eq(ciphers.id, cipherId)).get();
     return c.json(toCipherResponse(created!, userId, getBaseUrl(c)));
+});
+
+/**
+ * PUT /api/ciphers/:id/collections-admin
+ * 对应 CiphersController.PutCollectionsAdmin：管理员更新密码条目所属集合
+ */
+ciphersRoute.put('/:id/collections-admin', async (c) => {
+    const db = drizzle(c.env.DB);
+    const userId = c.get('userId');
+    const cipherId = c.req.param('id');
+    const body = await c.req.json<{ collectionIds: string[] }>();
+
+    const collectionIds = Array.isArray(body.collectionIds) ? body.collectionIds : [];
+
+    const cipher = await db.select().from(ciphers)
+        .where(eq(ciphers.id, cipherId)).get();
+    if (!cipher || !cipher.organizationId) {
+        throw new NotFoundError('Cipher not found.');
+    }
+
+    const orgId = cipher.organizationId;
+    const orgUser = await db.select().from(organizationUsers)
+        .where(and(
+            eq(organizationUsers.organizationId, orgId),
+            eq(organizationUsers.userId, userId)
+        )).get();
+    if (!orgUser || orgUser.status !== 2) {
+        throw new NotFoundError('Cipher not found.');
+    }
+
+    if (collectionIds.length > 0) {
+        const orgCollections = await db.select({ id: collections.id }).from(collections)
+            .where(and(eq(collections.organizationId, orgId), inArray(collections.id, collectionIds)))
+            .all();
+        const validIds = new Set(orgCollections.map((r) => r.id));
+        const invalid = collectionIds.filter((id) => !validIds.has(id));
+        if (invalid.length > 0) {
+            throw new BadRequestError('One or more collections not found or do not belong to this organization.');
+        }
+    }
+
+    const now = new Date().toISOString();
+    await db.delete(collectionCiphers).where(eq(collectionCiphers.cipherId, cipherId));
+    if (collectionIds.length > 0) {
+        await db.insert(collectionCiphers).values(
+            collectionIds.map((collId) => ({ cipherId, collectionId: collId }))
+        );
+    }
+    await db.update(ciphers).set({ revisionDate: now }).where(eq(ciphers.id, cipherId));
+
+    const updated = await db.select().from(ciphers).where(eq(ciphers.id, cipherId)).get();
+    const baseUrl = getBaseUrl(c);
+    const resp = toCipherResponse(updated!, userId, baseUrl, 'cipherDetails');
+    return c.json({
+        ...resp,
+        collectionIds,
+        object: 'cipherMiniDetails',
+    });
 });
 
 /**

@@ -7,7 +7,7 @@
 import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq, and } from 'drizzle-orm';
-import { users, devices, refreshTokens } from '../db/schema';
+import { users, devices, refreshTokens, organizationUsers } from '../db/schema';
 import { signJwt } from '../middleware/auth';
 import { generateUuid, generateSecureRandomString, generateRefreshToken, sha256, verifyPassword } from '../services/crypto';
 import { verifyAuthenticatorCode } from '../services/totp';
@@ -228,10 +228,8 @@ identity.post('/accounts/register/verification-email-clicked', async (c) => {
 /**
  * POST /identity/accounts/register/finish
  * 新注册流程第三步：完成注册，提交加密密钥和密码哈希。
- * 新 API 字段名与旧版不同：
- *   userSymmetricKey  (旧: key)
- *   userAsymmetricKeys.publicKey / .encryptedPrivateKey (旧: keys.publicKey / .encryptedPrivateKey)
- *   kdfType (旧: kdf)
+ * 若该邮箱已在 users 表存在且存在「待接受的组织邀请」(organization_users status=Invited)，
+ * 则视为邀请完成注册：用本次提交的密码与密钥更新该用户，不报「已注册」。
  */
 identity.post('/accounts/register/finish', async (c) => {
     const body = await c.req.json() as {
@@ -257,15 +255,41 @@ identity.post('/accounts/register/finish', async (c) => {
 
     const db = drizzle(c.env.DB);
     const email = body.email.toLowerCase().trim();
-
-    const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).get();
-    if (existing) throw new BadRequestError('Email is already registered.');
-
     const { generateSecureRandomString } = await import('../services/crypto');
     const now = new Date().toISOString();
-    const userId = crypto.randomUUID();
 
-    // 兼容新旧字段名
+    const existingUser = await db.select().from(users).where(eq(users.email, email)).get();
+
+    if (existingUser) {
+        // 该邮箱已存在：仅当存在待接受的组织邀请时允许「完成注册」（用新密码/密钥更新）
+        const pendingInvite = await db.select().from(organizationUsers)
+            .where(and(eq(organizationUsers.email, email), eq(organizationUsers.status, 0)))
+            .get();
+        if (!pendingInvite) {
+            throw new BadRequestError('Email is already registered.');
+        }
+        const symmetricKey = body.userSymmetricKey || body.key || null;
+        const asymKeys = body.userAsymmetricKeys || body.keys;
+        const kdfType = body.kdfType ?? body.kdf ?? 0;
+        await db.update(users).set({
+            masterPassword: body.masterPasswordHash,
+            masterPasswordHint: body.masterPasswordHint ?? null,
+            key: symmetricKey,
+            publicKey: asymKeys?.publicKey ?? null,
+            privateKey: asymKeys?.encryptedPrivateKey ?? null,
+            kdf: kdfType,
+            kdfIterations: body.kdfIterations ?? 600000,
+            kdfMemory: body.kdfMemory ?? null,
+            kdfParallelism: body.kdfParallelism ?? null,
+            accountRevisionDate: now,
+            revisionDate: now,
+            emailVerified: true,
+            name: body.name ?? existingUser.name,
+        }).where(eq(users.id, existingUser.id));
+        return c.json(null, 200);
+    }
+
+    const userId = crypto.randomUUID();
     const symmetricKey = body.userSymmetricKey || body.key || null;
     const asymKeys = body.userAsymmetricKeys || body.keys;
     const kdfType = body.kdfType ?? body.kdf ?? 0;

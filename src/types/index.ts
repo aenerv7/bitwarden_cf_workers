@@ -17,6 +17,18 @@ export type Bindings = {
      * 如果设置，将与 license.InstallationId 进行比对，保持与官方一致的校验行为。
      */
     INSTALLATION_ID?: string;
+    /**
+     * 可选：Web Vault 前端地址，用于生成邀请链接。
+     * 例如 https://vault.example.com 或 http://localhost:8080（末尾不要 /#）
+     * 未设置时邀请链接使用占位符，需管理员自行替换。
+     */
+    VAULT_BASE_URL?: string;
+    /**
+     * 可选：设为 "true" 时，邀请链接一律走「注册」流程（finish-signup），被邀请人需设置主密钥。
+     * 适用于：被邀请邮箱尚未注册、或希望被邀请人用邀请链接重新设置密码的场景。
+     * 不设置或非 "true" 时：若该邮箱已在 users 表存在则走「登录」，否则走「注册」。
+     */
+    FORCE_INVITE_REGISTER?: string;
 };
 
 // Hono 应用变量

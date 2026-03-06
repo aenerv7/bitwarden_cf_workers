@@ -10,6 +10,7 @@ import { eq, and, inArray } from 'drizzle-orm';
 import { users, ciphers, folders, sends, organizations, organizationUsers, collections, collectionCiphers } from '../db/schema';
 import { authMiddleware } from '../middleware/auth';
 import { NotFoundError } from '../middleware/error';
+import { toProfileOrganizationResponse } from '../models/organization-responses';
 import type {
     Bindings, Variables, CipherType, CipherRepromptType, SendType,
     ProfileResponse, SyncResponse, GlobalEquivalentDomain,
@@ -155,45 +156,7 @@ sync.get('/', async (c) => {
         .where(eq(organizationUsers.userId, userId))
         .all();
 
-    const profileOrganizations = orgsData.map(d => ({
-        id: d.org.id,
-        name: d.org.name,
-        key: d.orgUser.key,
-        status: d.orgUser.status,
-        type: d.orgUser.type,
-        enabled: d.org.enabled,
-        useTotp: d.org.useTotp ?? true,
-        use2fa: true,
-        useApi: true,
-        useSso: false,
-        useKeyConnector: false,
-        useScim: false,
-        useGroups: false,
-        useDirectory: false,
-        useEvents: true,
-        usePolicies: true,
-        useResetPassword: false,
-        useCustomPermissions: false,
-        useActivateAutofillPolicy: false,
-        useRiskInsights: false,
-        useOrganizationDomains: false,
-        useAdminSponsoredFamilies: false,
-        useSecretsManager: false,
-        usePhishingBlocker: false,
-        useDisableSMAdsForUsers: false,
-        usePasswordManager: true,
-        useMyItems: true,
-        useAutomaticUserConfirmation: false,
-        usersGetPremium: hasPremiumPersonally || (d.org.planType ?? 0) >= 1,
-        keyConnectorEnabled: false,
-        maxStorageGb: d.org.maxStorageGb ?? 1,
-        seats: d.org.seats ?? 0,
-        maxCollections: null,
-        accessSecretsManager: false,
-        planProductType: d.org.planType ?? 0,
-        permissions: d.orgUser.permissions ? JSON.parse(d.orgUser.permissions) : null,
-        object: 'profileOrganization',
-    }));
+    const profileOrganizations = orgsData.map(d => toProfileOrganizationResponse(d.org, d.orgUser));
 
     // 如果用户有组织，获取 Collections 和所有相关的 Ciphers
     const myCollections: any[] = [];
