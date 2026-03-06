@@ -64,9 +64,9 @@ async function extractFileFromRequest(c: any): Promise<{ file: File; formData: R
 
 /**
  * 将数据库记录转换为 Bitwarden API 响应格式
- * objectType: "cipher" 用于单个 CRUD 端点, "cipherDetails" 用于列表/sync
+ * objectType: "cipher" 用于单个 CRUD 端点, "cipherDetails" 用于列表/sync, "cipherMiniDetails" 用于 GET .../admin
  */
-function toCipherResponse(cipher: any, userId: string, baseUrl: string, objectType: 'cipher' | 'cipherDetails' = 'cipher'): CipherResponse {
+function toCipherResponse(cipher: any, userId: string, baseUrl: string, objectType: 'cipher' | 'cipherDetails' | 'cipherMiniDetails' = 'cipher'): CipherResponse {
     const data = JSON.parse(cipher.data || '{}');
     const favorites = cipher.favorites ? JSON.parse(cipher.favorites) : {};
     const folders = cipher.folders ? JSON.parse(cipher.folders) : {};
@@ -272,6 +272,51 @@ ciphersRoute.get('/organization-details/assigned', async (c) => {
         object: 'list',
         continuationToken: null,
     });
+});
+
+/**
+ * GET /api/ciphers/:id/admin
+ * 对应 CiphersController.GetAdmin
+ * 管理员查看组织内任意密码条目（需 ViewAllCollections 权限：Owner/Admin 或 EditAnyCollection/DeleteAnyCollection）
+ */
+ciphersRoute.get('/:id/admin', async (c) => {
+    const db = drizzle(c.env.DB);
+    const userId = c.get('userId');
+    const cipherId = c.req.param('id');
+
+    const cipher = await db.select().from(ciphers).where(eq(ciphers.id, cipherId)).get();
+    if (!cipher || !cipher.organizationId) {
+        throw new NotFoundError('Cipher not found.');
+    }
+
+    const orgUser = await db.select().from(organizationUsers)
+        .where(and(
+            eq(organizationUsers.organizationId, cipher.organizationId),
+            eq(organizationUsers.userId, userId)
+        )).get();
+
+    if (!orgUser || orgUser.status !== 2) {
+        throw new NotFoundError('Cipher not found.');
+    }
+    // ViewAllCollections: Owner(0)/Admin(1) 或自定义权限 EditAnyCollection/DeleteAnyCollection
+    let canViewAll = orgUser.type === 0 || orgUser.type === 1;
+    if (!canViewAll && orgUser.permissions) {
+        try {
+            const perms = JSON.parse(orgUser.permissions);
+            if (perms.editAnyCollection || perms.deleteAnyCollection) canViewAll = true;
+        } catch (_) { /* ignore */ }
+    }
+    if (!canViewAll) {
+        throw new NotFoundError('Cipher not found.');
+    }
+
+    const cipherCollections = await db.select().from(collectionCiphers)
+        .where(eq(collectionCiphers.cipherId, cipherId)).all();
+    const collectionIds = cipherCollections.map(cc => cc.collectionId);
+
+    const resp = toCipherResponse(cipher, userId, getBaseUrl(c), 'cipherMiniDetails');
+    resp.collectionIds = collectionIds;
+    return c.json(resp);
 });
 
 /**
