@@ -6,8 +6,8 @@
 
 import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
-import { eq, and, desc, isNull, isNotNull } from 'drizzle-orm';
-import { users, ciphers, folders, collectionCiphers, events } from '../db/schema';
+import { eq, and, desc, isNull, isNotNull, inArray } from 'drizzle-orm';
+import { users, ciphers, folders, collectionCiphers, events, organizationUsers } from '../db/schema';
 import { authMiddleware } from '../middleware/auth';
 import { logEvent } from '../services/events';
 import { toEventResponse } from './events';
@@ -155,6 +155,117 @@ ciphersRoute.get('/', async (c) => {
 
     const baseUrl = getBaseUrl(c);
     const data = results.map((cipher) => toCipherResponse(cipher, userId, baseUrl, 'cipherDetails'));
+
+    return c.json({
+        data,
+        object: 'list',
+        continuationToken: null,
+    });
+});
+
+/**
+ * GET /api/ciphers/organization-details
+ * 对应 CiphersController.GetOrganizationCiphers
+ * 返回组织的所有密码条目（管理员视图）
+ */
+ciphersRoute.get('/organization-details', async (c) => {
+    const db = drizzle(c.env.DB);
+    const userId = c.get('userId');
+    const organizationId = c.req.query('organizationId');
+
+    if (!organizationId) {
+        throw new BadRequestError('organizationId is required.');
+    }
+
+    const orgUser = await db.select().from(organizationUsers)
+        .where(and(
+            eq(organizationUsers.organizationId, organizationId),
+            eq(organizationUsers.userId, userId)
+        )).get();
+
+    if (!orgUser || orgUser.status !== 2) {
+        throw new NotFoundError('Organization not found.');
+    }
+
+    const orgCiphers = await db.select().from(ciphers)
+        .where(eq(ciphers.organizationId, organizationId))
+        .all();
+
+    const cipherCollectionMap: Record<string, string[]> = {};
+    if (orgCiphers.length > 0) {
+        const orgCollCiphers = await db.select().from(collectionCiphers)
+            .where(inArray(collectionCiphers.cipherId, orgCiphers.map(ci => ci.id)))
+            .all();
+        for (const cc of orgCollCiphers) {
+            if (!cipherCollectionMap[cc.cipherId]) cipherCollectionMap[cc.cipherId] = [];
+            cipherCollectionMap[cc.cipherId].push(cc.collectionId);
+        }
+    }
+
+    const baseUrl = getBaseUrl(c);
+    const data = orgCiphers.map((cipher) => {
+        const resp = toCipherResponse(cipher, userId, baseUrl, 'cipherDetails');
+        return {
+            ...resp,
+            collectionIds: cipherCollectionMap[cipher.id] || [],
+            object: 'cipherMiniDetails',
+        };
+    });
+
+    return c.json({
+        data,
+        object: 'list',
+        continuationToken: null,
+    });
+});
+
+/**
+ * GET /api/ciphers/organization-details/assigned
+ * 对应 CiphersController.GetAssignedOrganizationCiphers
+ * 返回用户在组织中被分配的密码条目
+ */
+ciphersRoute.get('/organization-details/assigned', async (c) => {
+    const db = drizzle(c.env.DB);
+    const userId = c.get('userId');
+    const organizationId = c.req.query('organizationId');
+
+    if (!organizationId) {
+        throw new BadRequestError('organizationId is required.');
+    }
+
+    const orgUser = await db.select().from(organizationUsers)
+        .where(and(
+            eq(organizationUsers.organizationId, organizationId),
+            eq(organizationUsers.userId, userId)
+        )).get();
+
+    if (!orgUser || orgUser.status !== 2) {
+        throw new NotFoundError('Organization not found.');
+    }
+
+    const orgCiphers = await db.select().from(ciphers)
+        .where(eq(ciphers.organizationId, organizationId))
+        .all();
+
+    const cipherCollectionMap: Record<string, string[]> = {};
+    if (orgCiphers.length > 0) {
+        const orgCollCiphers = await db.select().from(collectionCiphers)
+            .where(inArray(collectionCiphers.cipherId, orgCiphers.map(ci => ci.id)))
+            .all();
+        for (const cc of orgCollCiphers) {
+            if (!cipherCollectionMap[cc.cipherId]) cipherCollectionMap[cc.cipherId] = [];
+            cipherCollectionMap[cc.cipherId].push(cc.collectionId);
+        }
+    }
+
+    const baseUrl = getBaseUrl(c);
+    const data = orgCiphers.map((cipher) => {
+        const resp = toCipherResponse(cipher, userId, baseUrl, 'cipherDetails');
+        return {
+            ...resp,
+            collectionIds: cipherCollectionMap[cipher.id] || [],
+        };
+    });
 
     return c.json({
         data,
