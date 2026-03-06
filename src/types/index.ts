@@ -30,6 +30,13 @@ export type Bindings = {
      * 不设置或非 "true" 时：若该邮箱已在 users 表存在则走「登录」，否则走「注册」。
      */
     FORCE_INVITE_REGISTER?: string;
+    /**
+     * 控制开放注册行为。
+     * "true"  - 始终允许开放注册
+     * "false" - 始终禁止开放注册（仅邀请注册有效）
+     * "auto"  - 当系统中尚无用户时允许注册，有用户后自动关闭（默认）
+     */
+    SIGNUPS_ALLOWED?: string;
 };
 
 // Hono 应用变量

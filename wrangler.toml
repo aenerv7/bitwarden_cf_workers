@@ -12,6 +12,8 @@ GLOBAL_PREMIUM = "true"
 # VAULT_BASE_URL = "http://localhost:8080"
 # 设为 "true" 时，邀请链接一律进入「注册」页，被邀请人需设置主密钥（适合自建、该邮箱尚未注册或希望走注册流程）
 # FORCE_INVITE_REGISTER = "true"
+# 控制开放注册行为: "true" 始终允许 | "false" 始终禁止 | "auto" 无用户时允许，有用户后关闭（默认）
+# SIGNUPS_ALLOWED = "auto"
 
 [[d1_databases]]
 binding = "DB"

@@ -15,6 +15,7 @@ import { logEvent } from '../services/events';
 import { BadRequestError } from '../middleware/error';
 import { bytesToBase64Url, base64UrlToBytes, verifyWebAuthnAuthentication } from '../services/webauthn';
 import { webAuthnCredentials } from '../db/schema';
+import { isSignupAllowed } from '../services/signup-guard';
 import type { Bindings, Variables, KdfType, PreloginRequest, PreloginResponse, RegisterRequest, TokenRequest, TokenResponse } from '../types';
 
 const identity = new Hono<{ Bindings: Bindings; Variables: Variables }>();
@@ -139,6 +140,10 @@ identity.post('/accounts/register', async (c) => {
     const db = drizzle(c.env.DB);
     const email = body.email.toLowerCase().trim();
 
+    if (!await isSignupAllowed(c.env, db, email)) {
+        throw new BadRequestError('Registration is disabled. Please contact the administrator for an invitation.');
+    }
+
     const { generateSecureRandomString } = await import('../services/crypto');
     const { users } = await import('../db/schema');
 
@@ -201,6 +206,10 @@ identity.post('/accounts/register/send-verification-email', async (c) => {
 
     const db = drizzle(c.env.DB);
     const email = body.email.toLowerCase().trim();
+
+    if (!await isSignupAllowed(c.env, db, email)) {
+        throw new BadRequestError('Registration is disabled. Please contact the administrator for an invitation.');
+    }
 
     const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).get();
     if (existing) throw new BadRequestError('Email is already registered.');
@@ -287,6 +296,11 @@ identity.post('/accounts/register/finish', async (c) => {
             name: body.name ?? existingUser.name,
         }).where(eq(users.id, existingUser.id));
         return c.json(null, 200);
+    }
+
+    // 新用户注册（非邀请）：检查是否允许开放注册
+    if (!await isSignupAllowed(c.env, db, email)) {
+        throw new BadRequestError('Registration is disabled. Please contact the administrator for an invitation.');
     }
 
     const userId = crypto.randomUUID();

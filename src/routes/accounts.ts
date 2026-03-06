@@ -11,6 +11,7 @@ import { users, organizations, organizationUsers } from '../db/schema';
 import { authMiddleware } from '../middleware/auth';
 import { BadRequestError, NotFoundError } from '../middleware/error';
 import { generateSecureRandomString, verifyPassword } from '../services/crypto';
+import { isSignupAllowed } from '../services/signup-guard';
 import type { Bindings, Variables, ProfileResponse, AccountKeysResponse } from '../types';
 import { pushLogOut, pushSyncUser } from '../services/push-notification';
 import { PushType } from '../types/push-notification';
@@ -22,7 +23,7 @@ const accounts = new Hono<{ Bindings: Bindings; Variables: Variables }>();
  * 用户注册 (免鉴权)
  */
 accounts.post('/register', async (c) => {
-    const body = await c.req.json<any>(); // Reusing specific types or any for simplicity as it was imported in identity
+    const body = await c.req.json<any>();
 
     if (!body.email || !body.masterPasswordHash) {
         throw new BadRequestError('Email and master password hash are required.');
@@ -31,7 +32,10 @@ accounts.post('/register', async (c) => {
     const db = drizzle(c.env.DB);
     const email = body.email.toLowerCase().trim();
 
-    // 检查邮箱是否已注册
+    if (!await isSignupAllowed(c.env, db, email)) {
+        throw new BadRequestError('Registration is disabled. Please contact the administrator for an invitation.');
+    }
+
     const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).get();
     if (existing) {
         throw new BadRequestError('Email is already taken.');
