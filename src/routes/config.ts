@@ -34,7 +34,6 @@ config.get('/', async (c) => {
             'cxp-export-mobile': true,              // Credential exchange export
             'cxp-import-mobile': true,              // Credential exchange import
             'cipher-key-encryption': true,          // Individual cipher encryption
-            'enableCipherKeyEncryption': true,      // SDK cipher key encryption
             'pm-18021-force-update-kdf-settings': false, // Force KDF updates (keep off)
             'pm-20558-migrate-myvault-to-myitems': true, // My Vault -> My Items
             'pm-23995-no-logout-on-kdf-change': true,   // No logout on KDF change
