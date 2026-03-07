@@ -155,6 +155,35 @@ workers/
 └── package.json
 ```
 
+## 环境变量
+
+在 `wrangler.toml` 的 `[vars]` 中配置，或通过 `npx wrangler secret put` 设置敏感值。
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `JWT_SECRET` | — | **必须修改**。JWT 签名密钥，生产环境请用 `wrangler secret put` 配置 |
+| `JWT_EXPIRATION` | `3600` | Access Token 有效期（秒） |
+| `JWT_REFRESH_EXPIRATION` | `2592000` | Refresh Token 有效期（秒），默认 30 天 |
+| `GLOBAL_PREMIUM` | `true` | 全局启用 Premium 功能 |
+| `VAULT_BASE_URL` | — | Web Vault 前端地址（如 `https://vault.example.com`），用于生成邀请链接 |
+| `FORCE_INVITE_REGISTER` | — | 设为 `true` 时，邀请链接一律走注册流程 |
+| `SIGNUPS_ALLOWED` | `auto` | 控制开放注册行为，见下方说明 |
+| `INSTALLATION_ID` | — | 自建许可证校验用的 Installation ID |
+
+### 注册控制 (`SIGNUPS_ALLOWED`)
+
+面向个人/家庭自托管场景，支持在首个用户注册后自动关闭开放注册，防止他人随意注册。
+
+| 值 | 行为 |
+|------|------|
+| `auto` | **默认值**。系统中无用户时允许注册，有用户后自动关闭开放注册 |
+| `true` | 始终允许任何人注册 |
+| `false` | 始终禁止开放注册 |
+
+> 无论哪种模式，通过组织邀请的注册始终有效——被邀请人可以正常完成注册。
+
+典型用法：部署后不做任何配置（默认 `auto`），第一个人注册成为管理员后，后续用户只能通过组织邀请加入。
+
 ## 安全说明
 
 - **JWT_SECRET** 必须在生产环境中使用 `wrangler secret put` 配置为强随机值
@@ -162,6 +191,7 @@ workers/
 - 所有密码库数据在客户端加密，服务端只存储密文
 - Refresh token 使用 rotation 策略，每次使用后自动更换
 - 防用户枚举：prelogin 端点对不存在的用户也返回默认 KDF 参数
+- 注册控制：默认 `auto` 模式下，首个用户注册后自动关闭开放注册
 
 ## License
 
