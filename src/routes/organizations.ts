@@ -458,6 +458,24 @@ function generateOrganizationApiKey(): string {
 }
 
 /**
+ * 验证组织 API Key 操作的用户密码
+ * 对应官方 SecretVerificationRequestModel + VerifySecretAsync
+ */
+async function verifyOrgApiKeySecret(db: D1Db, userId: string, body: any): Promise<void> {
+    const secret = body?.masterPasswordHash || body?.secret || '';
+    if (!secret) {
+        throw new BadRequestError('MasterPasswordHash is required.');
+    }
+    const user = await db.select({ masterPassword: users.masterPassword })
+        .from(users).where(eq(users.id, userId)).get();
+    if (!user) throw new NotFoundError('User not found.');
+    const valid = await verifyPassword(secret, user.masterPassword || '');
+    if (!valid) {
+        throw new BadRequestError('Invalid password.');
+    }
+}
+
+/**
  * POST /api/organizations/:id/api-key
  * 对应 OrganizationsController.ApiKey（自托管简化版）
  *
@@ -470,7 +488,10 @@ orgs.post('/:id/api-key', async (c) => {
     const userId = c.get('userId');
 
     const orgUser = await getOrgUser(db, orgId, userId);
-    requireOwnerOrAdmin(orgUser);
+    requireOwner(orgUser);
+
+    const body = await c.req.json<any>().catch(() => ({}));
+    await verifyOrgApiKeySecret(db, userId, body);
 
     const org = await db.select().from(organizations).where(eq(organizations.id, orgId)).get();
     if (!org) throw new NotFoundError('Organization not found.');
@@ -498,7 +519,7 @@ orgs.post('/:id/api-key', async (c) => {
  * POST /api/organizations/:id/rotate-api-key
  * 对应 OrganizationsController.RotateApiKey（自托管简化版）
  *
- * 始终生成一个新的组织 API Key 并覆盖旧值。
+ * 验证用户主密码后生成新的组织 API Key 并覆盖旧值。
  */
 orgs.post('/:id/rotate-api-key', async (c) => {
     const db = drizzle(c.env.DB);
@@ -506,7 +527,10 @@ orgs.post('/:id/rotate-api-key', async (c) => {
     const userId = c.get('userId');
 
     const orgUser = await getOrgUser(db, orgId, userId);
-    requireOwnerOrAdmin(orgUser);
+    requireOwner(orgUser);
+
+    const body = await c.req.json<any>().catch(() => ({}));
+    await verifyOrgApiKeySecret(db, userId, body);
 
     const org = await db.select().from(organizations).where(eq(organizations.id, orgId)).get();
     if (!org) throw new NotFoundError('Organization not found.');
