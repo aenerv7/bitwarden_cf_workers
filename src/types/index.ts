@@ -11,6 +11,7 @@ export type Bindings = {
     JWT_EXPIRATION: string;
     JWT_REFRESH_EXPIRATION: string;
     ATTACHMENTS: R2Bucket;
+    ICONS_CACHE: KVNamespace;
     NOTIFICATION_HUB: DurableObjectNamespace;
     GLOBAL_PREMIUM?: string;
     /**
@@ -37,6 +38,18 @@ export type Bindings = {
      * "auto"  - 当系统中尚无用户时允许注册，有用户后自动关闭（默认）
      */
     SIGNUPS_ALLOWED?: string;
+    /**
+     * Icons 成功缓存 TTL（秒），默认 1209600（14天）
+     */
+    ICONS_CACHE_SUCCESS_TTL_SECONDS?: string;
+    /**
+     * Icons 负缓存 TTL（秒），默认 43200（12小时）
+     */
+    ICONS_CACHE_NEGATIVE_TTL_SECONDS?: string;
+    /**
+     * 最大可缓存 icon 大小（字节），默认 51200（50KB）
+     */
+    ICONS_MAX_IMAGE_BYTES?: string;
 };
 
 // Hono 应用变量

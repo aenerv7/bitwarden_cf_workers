@@ -31,8 +31,35 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
-      - name: Set production D1 database ID
-        run: sed -i 's/database_id = "local"/database_id = "${{ secrets.D1_DATABASE_ID }}"/' wrangler.toml
+      - name: Validate required deployment secrets
+        run: |
+          set -euo pipefail
+          missing=0
+          if [ -z "${D1_DATABASE_ID:-}" ]; then
+            echo "::error::Missing required secret: D1_DATABASE_ID"
+            missing=1
+          fi
+          if [ -z "${ICONS_CACHE_ID:-}" ]; then
+            echo "::error::Missing required secret: ICONS_CACHE_ID"
+            missing=1
+          fi
+          if [ -z "${ICONS_CACHE_PREVIEW_ID:-}" ]; then
+            echo "::error::Missing required secret: ICONS_CACHE_PREVIEW_ID"
+            missing=1
+          fi
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+        env:
+          D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+          ICONS_CACHE_ID: ${{ secrets.ICONS_CACHE_ID }}
+          ICONS_CACHE_PREVIEW_ID: ${{ secrets.ICONS_CACHE_PREVIEW_ID }}
+
+      - name: Set production bindings in wrangler.toml
+        run: |
+          sed -i 's/database_id = "local"/database_id = "${{ secrets.D1_DATABASE_ID }}"/' wrangler.toml
+          sed -i 's/id = "local-icons-cache"/id = "${{ secrets.ICONS_CACHE_ID }}"/' wrangler.toml
+          sed -i 's/preview_id = "local-icons-cache"/preview_id = "${{ secrets.ICONS_CACHE_PREVIEW_ID }}"/' wrangler.toml
 
       - name: Apply D1 migrations
         run: npx wrangler d1 migrations apply bitwarden-db --remote
