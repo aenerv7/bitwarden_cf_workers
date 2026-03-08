@@ -158,6 +158,7 @@ Go to [Cloudflare Dashboard > API Tokens](https://dash.cloudflare.com/profile/ap
 | Scope | Resource | Permission |
 |-------|----------|------------|
 | Account | D1 | Edit |
+| Account | Workers KV Storage | Edit |
 | Account | Workers R2 Storage | Edit |
 | Account | Workers Scripts | Edit |
 | Account | Account Settings | Read |

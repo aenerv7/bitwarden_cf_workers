@@ -158,6 +158,7 @@ npx wrangler kv namespace create ICONS_CACHE --preview
 | 范围 | 资源 | 级别 |
 |------|------|------|
 | 帐户 | D1 | 编辑 |
+| 帐户 | Workers KV 存储 | 编辑 |
 | 帐户 | Workers R2 存储 | 编辑 |
 | 帐户 | Workers 脚本 | 编辑 |
 | 帐户 | 帐户设置 | 读取 |
