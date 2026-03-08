@@ -73,6 +73,24 @@ export function isSafeHttpUrl(input: string): boolean {
     return true;
 }
 
+/**
+ * IP 地址、内网域名等无法/不应抓取 icon 的 hostname，
+ * 直接返回默认图标而非 400。
+ */
+export function isUnfetchableHost(raw: string): boolean {
+    const h = raw.trim().toLowerCase();
+    if (!h || !h.includes('.')) {
+        return true;
+    }
+    if (isIpAddress(h)) {
+        return true;
+    }
+    if (BLOCKED_HOSTS.has(h) || BLOCKED_SUFFIXES.some((s) => h.endsWith(s))) {
+        return true;
+    }
+    return false;
+}
+
 function isIpAddress(hostname: string): boolean {
     if (IP_V4_PATTERN.test(hostname)) {
         return true;

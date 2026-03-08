@@ -2,12 +2,16 @@ import type { Bindings } from '../../types';
 import { buildCacheKeys, readCachedIcon, readNegativeCache, writeNegativeCache, writeSuccessCache } from './cache';
 import { DEFAULT_ICON_BYTES, DEFAULT_ICON_CONTENT_TYPE, mapDomain, resolveIconCacheConfig } from './constants';
 import { fetchBestIconForDomain } from './fetch';
-import { normalizeAndValidateHostname } from './security';
+import { normalizeAndValidateHostname, isUnfetchableHost } from './security';
 import type { IconResolveResult } from './types';
 
 const inFlight = new Map<string, Promise<IconResolveResult>>();
 
 export async function resolveIconResponse(hostnameParam: string, env: Bindings, requestUrl: string): Promise<Response> {
+    if (isUnfetchableHost(hostnameParam)) {
+        return createDefaultResponse(86400);
+    }
+
     const hostname = normalizeAndValidateHostname(hostnameParam);
     if (!hostname) {
         return new Response('Bad Request', { status: 400 });
