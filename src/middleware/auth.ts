@@ -115,8 +115,14 @@ async function hmacSign(data: string, secret: string): Promise<string> {
     return base64UrlEncodeBytes(new Uint8Array(signature));
 }
 
+/** Base64URL 编码字符串（UTF-8 安全，避免 btoa 对非 Latin1 字符报错） */
 function base64UrlEncode(str: string): string {
-    return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    const bytes = new TextEncoder().encode(str);
+    let binary = '';
+    for (const byte of bytes) {
+        binary += String.fromCharCode(byte);
+    }
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 function base64UrlEncodeBytes(bytes: Uint8Array): string {
@@ -127,7 +133,13 @@ function base64UrlEncodeBytes(bytes: Uint8Array): string {
     return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
+/** Base64URL 解码为 UTF-8 字符串（与 base64UrlEncode 配对） */
 function base64UrlDecode(str: string): string {
     const padded = str.replace(/-/g, '+').replace(/_/g, '/');
-    return atob(padded);
+    const binary = atob(padded);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+    }
+    return new TextDecoder().decode(bytes);
 }
