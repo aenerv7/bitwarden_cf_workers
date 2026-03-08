@@ -47,6 +47,19 @@ const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 app.onError(globalErrorHandler);
 
 // 全局中间件
+
+// 规范化尾部斜杠：Hono 的 route() 不匹配带尾部 / 的子路由请求，
+// 这里在路由匹配前内部重写 URL，保留原始 HTTP 方法和请求体。
+app.use('*', async (c, next) => {
+    const url = new URL(c.req.url);
+    if (url.pathname !== '/' && url.pathname.endsWith('/')) {
+        url.pathname = url.pathname.replace(/\/+$/, '');
+        const newReq = new Request(url.toString(), c.req.raw);
+        return app.fetch(newReq, c.env, c.executionCtx);
+    }
+    await next();
+});
+
 app.use('*', cors({
     origin: '*',
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
