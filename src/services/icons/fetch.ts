@@ -1,11 +1,12 @@
 import { isSafeHttpUrl } from './security';
 import type { FetchedIcon } from './types';
 
-const MAX_REDIRECTS = 2;
+const MAX_REDIRECTS = 3;
 const MAX_LINKS_SCANNED = 200;
 const MAX_ICON_LINKS = 10;
 const MAX_HTML_BYTES = 256 * 1024;
 const HTTP_TIMEOUT_MS = 5000;
+const FETCH_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 const ALLOWED_MEDIA_TYPES = new Set([
     'image/png',
@@ -103,7 +104,11 @@ async function safeFetchWithRedirects(input: string, redirects = 0): Promise<Res
 
     let response: Response;
     try {
-        response = await fetch(input, { redirect: 'manual', signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
+        response = await fetch(input, {
+            redirect: 'manual',
+            signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+            headers: { 'User-Agent': FETCH_UA },
+        });
     } catch {
         return null;
     }
