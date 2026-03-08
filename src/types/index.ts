@@ -182,13 +182,14 @@ export interface RegisterRequest {
 export interface TokenRequest {
     grant_type: GrantType;
     username?: string;
-    password?: string; // master password hash
+    password?: string; // master password hash, or access code for auth request flow
     scope?: string;
     client_id?: string;
     deviceType?: number;
     deviceIdentifier?: string;
     deviceName?: string;
     refresh_token?: string;
+    authRequest?: string;
     TwoFactorProvider?: number;
     TwoFactorToken?: string;
     TwoFactorRemember?: number;

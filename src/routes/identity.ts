@@ -14,8 +14,9 @@ import { verifyAuthenticatorCode } from '../services/totp';
 import { logEvent } from '../services/events';
 import { BadRequestError } from '../middleware/error';
 import { bytesToBase64Url, base64UrlToBytes, verifyWebAuthnAuthentication } from '../services/webauthn';
-import { webAuthnCredentials } from '../db/schema';
+import { webAuthnCredentials, authRequests } from '../db/schema';
 import { isSignupAllowed } from '../services/signup-guard';
+import { AuthRequestType } from '../types';
 import type { Bindings, Variables, KdfType, PreloginRequest, PreloginResponse, RegisterRequest, TokenRequest, TokenResponse } from '../types';
 
 const identity = new Hono<{ Bindings: Bindings; Variables: Variables }>();
@@ -363,6 +364,7 @@ identity.post('/connect/token', async (c) => {
             deviceIdentifier: formData['deviceIdentifier'] as string,
             deviceName: formData['deviceName'] as string,
             refresh_token: formData['refresh_token'] as string,
+            authRequest: (formData['authRequest'] || formData['AuthRequest']) as string,
             TwoFactorProvider: formData['TwoFactorProvider'] ? Number(formData['TwoFactorProvider']) : (formData['twoFactorProvider'] ? Number(formData['twoFactorProvider']) : undefined),
             TwoFactorToken: (formData['TwoFactorToken'] || formData['twoFactorToken']) as string,
         };
@@ -467,21 +469,58 @@ async function handlePasswordGrant(c: any, db: any, body: TokenRequest) {
         }, 400);
     }
 
-    // 验证密码
-    const passwordValid = await verifyPassword(body.password, user.masterPassword || '');
-    console.log(`[TOKEN] Password valid: ${passwordValid}`);
-    if (!passwordValid) {
-        // 更新失败登录计数
-        await db.update(users).set({
-            failedLoginCount: user.failedLoginCount + 1,
-            lastFailedLoginDate: new Date().toISOString(),
-        }).where(eq(users.id, user.id));
+    // Auth Request (设备登录) 流程：password 字段实际上是 access code
+    let validatedAuthRequest: any = null;
+    if (body.authRequest) {
+        console.log(`[TOKEN] Auth request flow detected: ${body.authRequest}`);
+        const authRequest = await db.select().from(authRequests)
+            .where(eq(authRequests.id, body.authRequest)).get();
 
-        return c.json({
-            error: 'invalid_grant',
-            error_description: 'invalid_username_or_password',
-            ErrorModel: { Message: 'Username or password is incorrect. Try again.', Object: 'error' },
-        }, 400);
+        if (!authRequest) {
+            console.log(`[TOKEN] Auth request not found`);
+            return c.json({
+                error: 'invalid_grant',
+                error_description: 'invalid_username_or_password',
+                ErrorModel: { Message: 'Username or password is incorrect. Try again.', Object: 'error' },
+            }, 400);
+        }
+
+        const isExpired = (Date.now() - new Date(authRequest.creationDate).getTime()) > 15 * 60 * 1000;
+        const isValid = authRequest.responseDate
+            && authRequest.approved === true
+            && !isExpired
+            && (authRequest.type ?? AuthRequestType.AuthenticateAndUnlock) === AuthRequestType.AuthenticateAndUnlock
+            && !authRequest.authenticationDate
+            && authRequest.userId === user.id
+            && authRequest.accessCode === body.password;
+
+        console.log(`[TOKEN] Auth request valid: ${!!isValid} (responded=${!!authRequest.responseDate}, approved=${authRequest.approved}, expired=${isExpired}, used=${!!authRequest.authenticationDate}, userMatch=${authRequest.userId === user.id}, codeMatch=${authRequest.accessCode === body.password})`);
+
+        if (!isValid) {
+            return c.json({
+                error: 'invalid_grant',
+                error_description: 'invalid_username_or_password',
+                ErrorModel: { Message: 'Username or password is incorrect. Try again.', Object: 'error' },
+            }, 400);
+        }
+
+        validatedAuthRequest = authRequest;
+    } else {
+        // 普通密码登录流程
+        const passwordValid = await verifyPassword(body.password, user.masterPassword || '');
+        console.log(`[TOKEN] Password valid: ${passwordValid}`);
+        if (!passwordValid) {
+            await db.update(users).set({
+                failedLoginCount: user.failedLoginCount + 1,
+                lastFailedLoginDate: new Date().toISOString(),
+            }).where(eq(users.id, user.id));
+
+            return c.json({
+                error: 'invalid_grant',
+                error_description: 'invalid_username_or_password',
+                ErrorModel: { Message: 'Username or password is incorrect. Try again.', Object: 'error' },
+            }, 400);
+        }
     }
 
     // 登录成功，重置失败计数
@@ -679,6 +718,13 @@ async function handlePasswordGrant(c: any, db: any, body: TokenRequest) {
         expirationDate: new Date(Date.now() + refreshExpiresIn * 1000).toISOString(),
         creationDate: new Date().toISOString(),
     });
+
+    // 标记 AuthRequest 已使用，防止重放
+    if (validatedAuthRequest) {
+        await db.update(authRequests).set({
+            authenticationDate: new Date().toISOString(),
+        }).where(eq(authRequests.id, validatedAuthRequest.id));
+    }
 
     // 记录审计日志
     await logEvent(c.env.DB, 1000, {
