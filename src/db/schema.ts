@@ -65,6 +65,7 @@ export const ciphers = sqliteTable('ciphers', {
     creationDate: text('creation_date').notNull(),
     revisionDate: text('revision_date').notNull(),
     deletedDate: text('deleted_date'),
+    archivedDate: text('archived_date'),
 }, (table) => [
     index('idx_ciphers_user_id').on(table.userId),
     index('idx_ciphers_organization_id').on(table.organizationId),

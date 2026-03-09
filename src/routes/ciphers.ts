@@ -130,7 +130,7 @@ function toCipherResponse(cipher: any, userId: string, baseUrl: string, objectTy
         revisionDate: cipher.revisionDate,
         creationDate: cipher.creationDate,
         deletedDate: cipher.deletedDate,
-        archivedDate: null, // 归档日期 - CipherResponseModel
+        archivedDate: cipher.archivedDate || null,
         key: cipher.key,
         object: objectType,
         collectionIds: [], // 个人 cipher 无 collection
@@ -1892,6 +1892,152 @@ ciphersRoute.put('/:id', async (c) => {
     ));
 
     return c.json(toCipherResponse(updated!, userId, getBaseUrl(c)));
+});
+
+/**
+ * PUT /api/ciphers/:id/archive
+ * 对应 CiphersController.PutArchive（归档单个）
+ */
+ciphersRoute.put('/:id/archive', async (c) => {
+    const db = drizzle(c.env.DB);
+    const userId = c.get('userId');
+    const cipherId = c.req.param('id');
+
+    const existing = await db.select().from(ciphers)
+        .where(and(eq(ciphers.id, cipherId), eq(ciphers.userId, userId))).get();
+    if (!existing) throw new NotFoundError('Cipher not found.');
+
+    const now = new Date().toISOString();
+    await db.update(ciphers).set({ archivedDate: now, revisionDate: now }).where(eq(ciphers.id, cipherId));
+    await db.update(users).set({ accountRevisionDate: now }).where(eq(users.id, userId));
+
+    const updated = await db.select().from(ciphers).where(eq(ciphers.id, cipherId)).get();
+
+    const contextId = c.get('jwtPayload')?.device || null;
+    c.executionCtx.waitUntil(pushSyncCipher(
+        c.env, PushType.SyncCipherUpdate, cipherId,
+        existing.organizationId ? null : userId, existing.organizationId || null,
+        null, now, contextId,
+    ));
+
+    return c.json(toCipherResponse(updated!, userId, getBaseUrl(c)));
+});
+
+/**
+ * PUT /api/ciphers/archive
+ * 对应 CiphersController.PutArchiveMany（批量归档）
+ */
+ciphersRoute.put('/archive', async (c) => {
+    const db = drizzle(c.env.DB);
+    const userId = c.get('userId');
+    const body = await c.req.json<{ ids: string[] }>();
+
+    if (!body.ids || body.ids.length === 0) throw new BadRequestError('No IDs provided.');
+    if (body.ids.length > 500) throw new BadRequestError('You can only archive up to 500 items at a time.');
+
+    const now = new Date().toISOString();
+    const results: any[] = [];
+
+    for (const id of body.ids) {
+        const existing = await db.select().from(ciphers)
+            .where(and(eq(ciphers.id, id), eq(ciphers.userId, userId))).get();
+        if (!existing) continue;
+
+        await db.update(ciphers).set({ archivedDate: now, revisionDate: now })
+            .where(and(eq(ciphers.id, id), eq(ciphers.userId, userId)));
+
+        const updated = await db.select().from(ciphers).where(eq(ciphers.id, id)).get();
+        if (updated) results.push(updated);
+
+        const contextId = c.get('jwtPayload')?.device || null;
+        c.executionCtx.waitUntil(pushSyncCipher(
+            c.env, PushType.SyncCipherUpdate, id,
+            existing.organizationId ? null : userId, existing.organizationId || null,
+            null, now, contextId,
+        ));
+    }
+
+    await db.update(users).set({ accountRevisionDate: now }).where(eq(users.id, userId));
+
+    const baseUrl = getBaseUrl(c);
+    return c.json({
+        data: results.map(r => toCipherResponse(r, userId, baseUrl)),
+        object: 'list',
+        continuationToken: null,
+    });
+});
+
+/**
+ * PUT /api/ciphers/:id/unarchive
+ * 对应 CiphersController.PutUnarchive（取消归档单个）
+ */
+ciphersRoute.put('/:id/unarchive', async (c) => {
+    const db = drizzle(c.env.DB);
+    const userId = c.get('userId');
+    const cipherId = c.req.param('id');
+
+    const existing = await db.select().from(ciphers)
+        .where(and(eq(ciphers.id, cipherId), eq(ciphers.userId, userId))).get();
+    if (!existing) throw new NotFoundError('Cipher not found.');
+
+    const now = new Date().toISOString();
+    await db.update(ciphers).set({ archivedDate: null, revisionDate: now }).where(eq(ciphers.id, cipherId));
+    await db.update(users).set({ accountRevisionDate: now }).where(eq(users.id, userId));
+
+    const updated = await db.select().from(ciphers).where(eq(ciphers.id, cipherId)).get();
+
+    const contextId = c.get('jwtPayload')?.device || null;
+    c.executionCtx.waitUntil(pushSyncCipher(
+        c.env, PushType.SyncCipherUpdate, cipherId,
+        existing.organizationId ? null : userId, existing.organizationId || null,
+        null, now, contextId,
+    ));
+
+    return c.json(toCipherResponse(updated!, userId, getBaseUrl(c)));
+});
+
+/**
+ * PUT /api/ciphers/unarchive
+ * 对应 CiphersController.PutUnarchiveMany（批量取消归档）
+ */
+ciphersRoute.put('/unarchive', async (c) => {
+    const db = drizzle(c.env.DB);
+    const userId = c.get('userId');
+    const body = await c.req.json<{ ids: string[] }>();
+
+    if (!body.ids || body.ids.length === 0) throw new BadRequestError('No IDs provided.');
+    if (body.ids.length > 500) throw new BadRequestError('You can only unarchive up to 500 items at a time.');
+
+    const now = new Date().toISOString();
+    const results: any[] = [];
+
+    for (const id of body.ids) {
+        const existing = await db.select().from(ciphers)
+            .where(and(eq(ciphers.id, id), eq(ciphers.userId, userId))).get();
+        if (!existing) continue;
+
+        await db.update(ciphers).set({ archivedDate: null, revisionDate: now })
+            .where(and(eq(ciphers.id, id), eq(ciphers.userId, userId)));
+
+        const updated = await db.select().from(ciphers).where(eq(ciphers.id, id)).get();
+        if (updated) results.push(updated);
+
+        const contextId = c.get('jwtPayload')?.device || null;
+        c.executionCtx.waitUntil(pushSyncCipher(
+            c.env, PushType.SyncCipherUpdate, id,
+            existing.organizationId ? null : userId, existing.organizationId || null,
+            null, now, contextId,
+        ));
+    }
+
+    await db.update(users).set({ accountRevisionDate: now }).where(eq(users.id, userId));
+
+    const baseUrl = getBaseUrl(c);
+    return c.json({
+        data: results.map(r => toCipherResponse(r, userId, baseUrl)),
+        object: 'list',
+        continuationToken: null,
+    });
 });
 
 export default ciphersRoute;

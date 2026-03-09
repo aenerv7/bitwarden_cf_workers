@@ -295,7 +295,7 @@ sync.get('/', async (c) => {
             revisionDate: cipher.revisionDate,
             creationDate: cipher.creationDate,
             deletedDate: cipher.deletedDate,
-            archivedDate: null,
+            archivedDate: cipher.archivedDate || null,
             key: cipher.key,
             object: 'cipherDetails',
             collectionIds: cipherCollectionMap[cipher.id] || [],
