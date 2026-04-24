@@ -694,10 +694,7 @@ ciphersRoute.post('/', async (c) => {
     // 兼容嵌套格式 { cipher: {...} } / { Cipher: {...} } 和扁平格式 {...}
     const body: CipherRequest = normalizeKeys(rawBody.cipher || rawBody.Cipher || rawBody);
 
-    console.log('[CIPHER CREATE] Raw body keys:', JSON.stringify(Object.keys(rawBody)));
-
     if (body.type === undefined || body.type === null || !body.name) {
-        console.log('[CIPHER CREATE] FULL RAW BODY:', JSON.stringify(rawBody).substring(0, 2000));
         throw new BadRequestError('Type and name are required.');
     }
 
@@ -783,10 +780,7 @@ ciphersRoute.post('/create', async (c) => {
     const cipherBody: CipherRequest = normalizeKeys(body.cipher || body.Cipher || body);
     const collectionIds: string[] = body.collectionIds || body.CollectionIds || [];
 
-    console.log('[CIPHER /create] Raw body keys:', JSON.stringify(Object.keys(body)));
-
     if (cipherBody.type === undefined || cipherBody.type === null || !cipherBody.name) {
-        console.log('[CIPHER /create] FULL RAW BODY:', JSON.stringify(body).substring(0, 2000));
         throw new BadRequestError('Type and name are required.');
     }
 
