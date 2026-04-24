@@ -233,7 +233,7 @@ identity.post('/accounts/register/verification-email-clicked', async (c) => {
     }
 
     // 自托管：接受任意 token（不严格验证），直接返回成功
-    return c.json(null, 200);
+    return c.json({ object: 'verificationEmailClicked' }, 200);
 });
 
 /**
@@ -297,7 +297,7 @@ identity.post('/accounts/register/finish', async (c) => {
             emailVerified: true,
             name: body.name ?? existingUser.name,
         }).where(eq(users.id, existingUser.id));
-        return c.json(null, 200);
+        return c.json({ object: 'register' }, 200);
     }
 
     // 新用户注册（非邀请）：检查是否允许开放注册
@@ -332,7 +332,7 @@ identity.post('/accounts/register/finish', async (c) => {
         revisionDate: now,
     });
 
-    return c.json(null, 200);
+    return c.json({ object: 'register' }, 200);
 });
 
 /**
