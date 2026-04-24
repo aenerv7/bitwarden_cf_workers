@@ -13,7 +13,6 @@
  */
 
 import { Hono } from 'hono';
-import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { errorHandler, globalErrorHandler } from './middleware/error';
 import { debugMiddleware } from './middleware/debug';
@@ -60,14 +59,26 @@ app.use('*', async (c, next) => {
     await next();
 });
 
-app.use('*', cors({
-    origin: (origin) => origin || '*',
-    allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'Authorization', 'Accept', 'Device-Type', 'Bitwarden-Client-Name', 'Bitwarden-Client-Version', 'Is-Prerelease', 'Auth-Email'],
-    exposeHeaders: ['Content-Length'],
-    maxAge: 86400,
-    credentials: true,
-}));
+app.use('*', async (c, next) => {
+    const origin = c.req.header('Origin') || '*';
+    // 预检请求：动态回显客户端请求的所有头，彻底避免 CORS 头被拦截
+    if (c.req.method === 'OPTIONS') {
+        return new Response(null, {
+            status: 204,
+            headers: {
+                'Access-Control-Allow-Origin': origin,
+                'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+                'Access-Control-Allow-Headers': c.req.header('Access-Control-Request-Headers') || '*',
+                'Access-Control-Allow-Credentials': 'true',
+                'Access-Control-Max-Age': '86400',
+            },
+        });
+    }
+    await next();
+    c.res.headers.set('Access-Control-Allow-Origin', origin);
+    c.res.headers.set('Access-Control-Allow-Credentials', 'true');
+    c.res.headers.set('Access-Control-Expose-Headers', 'Content-Length');
+});
 app.use('*', debugMiddleware);
 app.use('*', logger());
 app.use('*', errorHandler);
