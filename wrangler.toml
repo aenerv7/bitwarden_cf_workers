@@ -45,7 +45,7 @@ bindings = [
 
 [[migrations]]
 tag = "v1"
-new_classes = ["NotificationHub"]
+new_sqlite_classes = ["NotificationHub"]
 
 # 定时任务 - Cron Triggers
 # 对应官方 Admin/JobsHostedService.cs + Api/JobsHostedService.cs
