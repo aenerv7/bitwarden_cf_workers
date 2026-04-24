@@ -1,7 +1,7 @@
 /**
  * Bitwarden Workers - Sends 路由
  * 对应原始项目 Api/Tools/Controllers/SendsController.cs
- * 处理：Send（安全分享）的 CRUD 及匿名访问
+ * 处理：Send（安全分享）�?CRUD 及匿名访�?
  */
 
 import { Hono } from 'hono';
@@ -16,6 +16,18 @@ import { pushSyncSend } from '../services/push-notification';
 import { PushType } from '../types/push-notification';
 
 const sendsRoute = new Hono<{ Bindings: Bindings; Variables: Variables }>();
+
+/** PascalCase �?camelCase 键名转换 */
+function normalizeKeys(obj: any): any {
+    if (obj === null || obj === undefined || typeof obj !== 'object') return obj;
+    if (Array.isArray(obj)) return obj.map(normalizeKeys);
+    const result: any = {};
+    for (const key of Object.keys(obj)) {
+        const camelKey = key.charAt(0).toLowerCase() + key.slice(1);
+        result[camelKey] = obj[key];
+    }
+    return result;
+}
 
 function toSendResponse(send: any): SendResponse {
     const data = send.data ? JSON.parse(send.data) : null;
@@ -64,7 +76,7 @@ function toSendResponse(send: any): SendResponse {
     return baseResponse;
 }
 
-// ==================== 公开端点（匿名访问，必须先于认证路由注册）====================
+// ==================== 公开端点（匿名访问，必须先于认证路由注册�?===================
 
 /**
  * POST /api/sends/access/:id
@@ -96,7 +108,7 @@ sendsRoute.post('/access/:id', async (c) => {
         try {
             ok = await verifySendPassword(body.password, send.password);
         } catch {
-            // PBKDF2 computation error — treat as invalid password
+            // PBKDF2 computation error �?treat as invalid password
         }
         if (!ok) {
             return c.json({ message: 'Invalid password.', validationErrors: null, exceptionMessage: null, exceptionStackTrace: null, innerExceptionMessage: null, object: 'error' }, 400);
@@ -140,7 +152,7 @@ const authed = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 authed.use('/*', authMiddleware);
 
 /**
- * GET /api/sends - 获取所有 Send
+ * GET /api/sends - 获取所�?Send
  */
 authed.get('/', async (c) => {
     const db = drizzle(c.env.DB);
@@ -170,7 +182,7 @@ authed.post('/', async (c) => {
     const db = drizzle(c.env.DB);
     const userId = c.get('userId');
     const rawBody = await c.req.json<any>();
-    const body: SendRequest = rawBody.send || rawBody;
+    const body: SendRequest = normalizeKeys(rawBody.send || rawBody.Send || rawBody);
 
     if (body.type === undefined || !body.deletionDate) {
         throw new BadRequestError('Type and deletion date are required.');
@@ -215,7 +227,7 @@ authed.put('/:id', async (c) => {
     const userId = c.get('userId');
     const sendId = c.req.param('id');
     const rawBody = await c.req.json<any>();
-    const body: SendRequest = rawBody.send || rawBody;
+    const body: SendRequest = normalizeKeys(rawBody.send || rawBody.Send || rawBody);
 
     const existing = await db.select().from(sends)
         .where(and(eq(sends.id, sendId), eq(sends.userId, userId))).get();
@@ -298,7 +310,7 @@ authed.delete('/:id', async (c) => {
     return c.body(null, 204);
 });
 
-// 挂载认证路由（在公开路由之后）
+// 挂载认证路由（在公开路由之后�?
 sendsRoute.route('/', authed);
 
 export default sendsRoute;

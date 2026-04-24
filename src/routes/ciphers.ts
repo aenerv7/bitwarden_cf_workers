@@ -24,6 +24,21 @@ const ciphersRoute = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 // 所有端点都需要认证
 ciphersRoute.use('/*', authMiddleware);
 
+/**
+ * 将对象的 PascalCase 键名转换为 camelCase
+ * Bitwarden 客户端（尤其是 Android/iOS）可能发送 PascalCase 字段名
+ */
+function normalizeKeys(obj: any): any {
+    if (obj === null || obj === undefined || typeof obj !== 'object') return obj;
+    if (Array.isArray(obj)) return obj.map(normalizeKeys);
+    const result: any = {};
+    for (const key of Object.keys(obj)) {
+        const camelKey = key.charAt(0).toLowerCase() + key.slice(1);
+        result[camelKey] = obj[key];
+    }
+    return result;
+}
+
 /** 从请求 URL 中提取 baseUrl（protocol + host），用于构建附件绝对下载 URL */
 function getBaseUrl(c: any): string {
     const url = new URL(c.req.url);
@@ -676,24 +691,15 @@ ciphersRoute.post('/', async (c) => {
     const db = drizzle(c.env.DB);
     const userId = c.get('userId');
     const rawBody = await c.req.json<any>();
-    // 兼容嵌套格式 { cipher: {...} } 和扁平格式 {...}
-    const body: CipherRequest = rawBody.cipher || rawBody;
-
-    // 兼容 PascalCase 字段名（部分客户端可能发送 Type/Name 而非 type/name）
-    const cipherType = body.type ?? body.Type ?? rawBody.Type;
-    const cipherName = body.name ?? body.Name ?? rawBody.Name;
+    // 兼容嵌套格式 { cipher: {...} } / { Cipher: {...} } 和扁平格式 {...}
+    const body: CipherRequest = normalizeKeys(rawBody.cipher || rawBody.Cipher || rawBody);
 
     console.log('[CIPHER CREATE] Raw body keys:', JSON.stringify(Object.keys(rawBody)));
-    console.log('[CIPHER CREATE] type:', cipherType, 'name:', cipherName ? '***' : 'MISSING');
 
-    if (cipherType === undefined || cipherType === null || !cipherName) {
+    if (body.type === undefined || body.type === null || !body.name) {
         console.log('[CIPHER CREATE] FULL RAW BODY:', JSON.stringify(rawBody).substring(0, 2000));
         throw new BadRequestError('Type and name are required.');
     }
-
-    // 标准化字段名
-    body.type = cipherType;
-    body.name = cipherName;
 
     const now = new Date().toISOString();
     const cipherId = generateUuid();
@@ -774,22 +780,15 @@ ciphersRoute.post('/create', async (c) => {
     const db = drizzle(c.env.DB);
     const userId = c.get('userId');
     const body = await c.req.json<any>();
-    const cipherBody: CipherRequest = body.cipher || body;
-
-    // 兼容 PascalCase 字段名
-    const cipherType = cipherBody.type ?? cipherBody.Type ?? body.Type;
-    const cipherName = cipherBody.name ?? cipherBody.Name ?? body.Name;
+    const cipherBody: CipherRequest = normalizeKeys(body.cipher || body.Cipher || body);
+    const collectionIds: string[] = body.collectionIds || body.CollectionIds || [];
 
     console.log('[CIPHER /create] Raw body keys:', JSON.stringify(Object.keys(body)));
-    if (body.cipher) console.log('[CIPHER /create] Nested cipher keys:', JSON.stringify(Object.keys(body.cipher)));
 
-    if (cipherType === undefined || cipherType === null || !cipherName) {
+    if (cipherBody.type === undefined || cipherBody.type === null || !cipherBody.name) {
         console.log('[CIPHER /create] FULL RAW BODY:', JSON.stringify(body).substring(0, 2000));
         throw new BadRequestError('Type and name are required.');
     }
-
-    cipherBody.type = cipherType;
-    cipherBody.name = cipherName;
 
     const now = new Date().toISOString();
     const cipherId = generateUuid();
@@ -830,6 +829,16 @@ ciphersRoute.post('/create', async (c) => {
     });
 
     await db.update(users).set({ accountRevisionDate: now }).where(eq(users.id, userId));
+
+    // 处理 collectionIds（POST /create 的主要用途就是带 collection 的创建）
+    if (cipherBody.organizationId && collectionIds.length > 0) {
+        for (const colId of collectionIds) {
+            await db.insert(collectionCiphers).values({
+                collectionId: colId,
+                cipherId: cipherId,
+            }).onConflictDoNothing();
+        }
+    }
 
     await logEvent(c.env.DB, 1100, { userId, cipherId });
 
@@ -1668,7 +1677,7 @@ ciphersRoute.post('/:id', async (c) => {
     const db = drizzle(c.env.DB);
     const userId = c.get('userId');
     const rawBody = await c.req.json<any>();
-    const body: CipherRequest = rawBody.cipher || rawBody;
+    const body: CipherRequest = normalizeKeys(rawBody.cipher || rawBody.Cipher || rawBody);
 
     const existing = await db.select().from(ciphers)
         .where(and(eq(ciphers.id, id), eq(ciphers.userId, userId))).get();
@@ -1852,7 +1861,7 @@ ciphersRoute.put('/:id', async (c) => {
     const userId = c.get('userId');
     const cipherId = c.req.param('id');
     const rawBody = await c.req.json<any>();
-    const body: CipherRequest = rawBody.cipher || rawBody;
+    const body: CipherRequest = normalizeKeys(rawBody.cipher || rawBody.Cipher || rawBody);
 
     // 同时支持个人和组织 cipher
     let existing = await db.select().from(ciphers)

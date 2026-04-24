@@ -63,13 +63,18 @@ export const debugMiddleware: MiddlewareHandler<{
                 console.log(`  Body (form): <parse error: ${e}>`);
             }
         } else {
-            // JSON body
+            // JSON body - 使用 arrayBuffer 克隆避免消耗原始请求体
             try {
                 const clone = c.req.raw.clone();
-                const body = await clone.json().catch(() => null);
-                if (body) {
-                    const sanitized = sanitizeBody(body);
-                    console.log(`  Body: ${JSON.stringify(sanitized).slice(0, 200)}`);
+                const text = await clone.text();
+                if (text) {
+                    try {
+                        const body = JSON.parse(text);
+                        const sanitized = sanitizeBody(body);
+                        console.log(`  Body: ${JSON.stringify(sanitized).slice(0, 200)}`);
+                    } catch {
+                        console.log(`  Body (raw): ${text.slice(0, 200)}`);
+                    }
                 }
             } catch {
                 // 忽略无法解析的 body
