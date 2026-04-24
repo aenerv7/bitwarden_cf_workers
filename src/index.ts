@@ -63,7 +63,7 @@ app.use('*', async (c, next) => {
 app.use('*', cors({
     origin: (origin) => origin || '*',
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'Authorization', 'Accept', 'Device-Type', 'Bitwarden-Client-Name', 'Bitwarden-Client-Version'],
+    allowHeaders: ['Content-Type', 'Authorization', 'Accept', 'Device-Type', 'Bitwarden-Client-Name', 'Bitwarden-Client-Version', 'Is-Prerelease', 'Auth-Email'],
     exposeHeaders: ['Content-Length'],
     maxAge: 86400,
     credentials: true,
