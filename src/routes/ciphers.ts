@@ -675,7 +675,8 @@ ciphersRoute.delete('/:id/attachment/:attachmentId/admin', deleteAttachmentHandl
 ciphersRoute.post('/', async (c) => {
     const db = drizzle(c.env.DB);
     const userId = c.get('userId');
-    const body = await c.req.json<CipherRequest>();
+    const rawBody = await c.req.json<any>();
+    const body: CipherRequest = rawBody.cipher || rawBody;
 
     if (!body.type || !body.name) {
         throw new BadRequestError('Type and name are required.');
