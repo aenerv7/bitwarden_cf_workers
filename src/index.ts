@@ -61,11 +61,12 @@ app.use('*', async (c, next) => {
 });
 
 app.use('*', cors({
-    origin: '*',
+    origin: (origin) => origin || '*',
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization', 'Accept', 'Device-Type', 'Bitwarden-Client-Name', 'Bitwarden-Client-Version'],
     exposeHeaders: ['Content-Length'],
     maxAge: 86400,
+    credentials: true,
 }));
 app.use('*', debugMiddleware);
 app.use('*', logger());
