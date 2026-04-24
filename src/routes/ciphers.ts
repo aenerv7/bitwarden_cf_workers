@@ -676,16 +676,24 @@ ciphersRoute.post('/', async (c) => {
     const db = drizzle(c.env.DB);
     const userId = c.get('userId');
     const rawBody = await c.req.json<any>();
+    // 兼容嵌套格式 { cipher: {...} } 和扁平格式 {...}
     const body: CipherRequest = rawBody.cipher || rawBody;
 
-    console.log('[CIPHER CREATE] Raw body keys:', JSON.stringify(Object.keys(rawBody)));
-    console.log('[CIPHER CREATE] Body type:', body.type, 'name:', body.name ? '***' : 'MISSING');
-    if (rawBody.cipher) console.log('[CIPHER CREATE] Nested cipher keys:', JSON.stringify(Object.keys(rawBody.cipher)));
+    // 兼容 PascalCase 字段名（部分客户端可能发送 Type/Name 而非 type/name）
+    const cipherType = body.type ?? body.Type ?? rawBody.Type;
+    const cipherName = body.name ?? body.Name ?? rawBody.Name;
 
-    if (!body.type || !body.name) {
+    console.log('[CIPHER CREATE] Raw body keys:', JSON.stringify(Object.keys(rawBody)));
+    console.log('[CIPHER CREATE] type:', cipherType, 'name:', cipherName ? '***' : 'MISSING');
+
+    if (cipherType === undefined || cipherType === null || !cipherName) {
         console.log('[CIPHER CREATE] FULL RAW BODY:', JSON.stringify(rawBody).substring(0, 2000));
         throw new BadRequestError('Type and name are required.');
     }
+
+    // 标准化字段名
+    body.type = cipherType;
+    body.name = cipherName;
 
     const now = new Date().toISOString();
     const cipherId = generateUuid();
@@ -768,13 +776,20 @@ ciphersRoute.post('/create', async (c) => {
     const body = await c.req.json<any>();
     const cipherBody: CipherRequest = body.cipher || body;
 
+    // 兼容 PascalCase 字段名
+    const cipherType = cipherBody.type ?? cipherBody.Type ?? body.Type;
+    const cipherName = cipherBody.name ?? cipherBody.Name ?? body.Name;
+
     console.log('[CIPHER /create] Raw body keys:', JSON.stringify(Object.keys(body)));
     if (body.cipher) console.log('[CIPHER /create] Nested cipher keys:', JSON.stringify(Object.keys(body.cipher)));
 
-    if (!cipherBody.type || !cipherBody.name) {
+    if (cipherType === undefined || cipherType === null || !cipherName) {
         console.log('[CIPHER /create] FULL RAW BODY:', JSON.stringify(body).substring(0, 2000));
         throw new BadRequestError('Type and name are required.');
     }
+
+    cipherBody.type = cipherType;
+    cipherBody.name = cipherName;
 
     const now = new Date().toISOString();
     const cipherId = generateUuid();
