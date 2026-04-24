@@ -216,8 +216,9 @@ identity.post('/accounts/register/send-verification-email', async (c) => {
     if (existing) throw new BadRequestError('Email is already registered.');
 
     // 自托管：直接返回 token（无邮件服务时的 bypass）
+    // 客户端期望响应体是纯 JSON 字符串（JsonPrimitive），而非对象
     const token = await generateRegistrationToken(email, c.env.JWT_SECRET);
-    return c.json({ emailVerificationToken: token }, 200);
+    return c.json(token, 200);
 });
 
 /**
