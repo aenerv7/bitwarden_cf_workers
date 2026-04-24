@@ -12,7 +12,7 @@ import { authMiddleware } from '../middleware/auth';
 import { BadRequestError, NotFoundError } from '../middleware/error';
 import { generateSecureRandomString, verifyPassword } from '../services/crypto';
 import { isSignupAllowed } from '../services/signup-guard';
-import type { Bindings, Variables, ProfileResponse, AccountKeysResponse } from '../types';
+import type { Bindings, Variables, ProfileResponse, AccountKeysResponse, KdfType, PreloginRequest, PreloginResponse } from '../types';
 import { pushLogOut, pushSyncUser } from '../services/push-notification';
 import { PushType } from '../types/push-notification';
 
@@ -68,6 +68,54 @@ accounts.post('/register', async (c) => {
 
     return c.json(null, 200);
 });
+
+/**
+ * POST /api/accounts/prelogin
+ * POST /api/accounts/prelogin/password
+ * 对应 Identity/Controllers/AccountsController.cs -> PostPrelogin
+ * Web Vault 等客户端可能请求 /api/accounts/prelogin 而非 /identity/accounts/prelogin
+ * 此端点免鉴权，必须在 authMiddleware 之前注册
+ */
+async function handlePrelogin(c: any) {
+    const body = await c.req.json() as PreloginRequest;
+    if (!body.email) {
+        throw new BadRequestError('Email is required.');
+    }
+
+    const db = drizzle(c.env.DB);
+    const email = body.email.toLowerCase().trim();
+
+    const user = await db.select({
+        kdf: users.kdf,
+        kdfIterations: users.kdfIterations,
+        kdfMemory: users.kdfMemory,
+        kdfParallelism: users.kdfParallelism,
+    }).from(users).where(eq(users.email, email)).get();
+
+    const kdfType = (user?.kdf as KdfType) ?? 0;
+    const kdfIter = user?.kdfIterations ?? 600000;
+    const kdfMem = user?.kdfMemory ?? null;
+    const kdfPar = user?.kdfParallelism ?? null;
+
+    const response: PreloginResponse = {
+        kdf: kdfType,
+        kdfIterations: kdfIter,
+        kdfMemory: kdfMem,
+        kdfParallelism: kdfPar,
+        kdfSettings: {
+            kdfType: kdfType,
+            iterations: kdfIter,
+            memory: kdfMem,
+            parallelism: kdfPar,
+        },
+        salt: email,
+    };
+
+    return c.json(response);
+}
+
+accounts.post('/prelogin', handlePrelogin);
+accounts.post('/prelogin/password', handlePrelogin);
 
 // 其他端点都需要认证
 accounts.use('/*', authMiddleware);
