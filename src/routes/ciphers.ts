@@ -678,7 +678,12 @@ ciphersRoute.post('/', async (c) => {
     const rawBody = await c.req.json<any>();
     const body: CipherRequest = rawBody.cipher || rawBody;
 
+    console.log('[CIPHER CREATE] Raw body keys:', JSON.stringify(Object.keys(rawBody)));
+    console.log('[CIPHER CREATE] Body type:', body.type, 'name:', body.name ? '***' : 'MISSING');
+    if (rawBody.cipher) console.log('[CIPHER CREATE] Nested cipher keys:', JSON.stringify(Object.keys(rawBody.cipher)));
+
     if (!body.type || !body.name) {
+        console.log('[CIPHER CREATE] FULL RAW BODY:', JSON.stringify(rawBody).substring(0, 2000));
         throw new BadRequestError('Type and name are required.');
     }
 
@@ -763,7 +768,11 @@ ciphersRoute.post('/create', async (c) => {
     const body = await c.req.json<any>();
     const cipherBody: CipherRequest = body.cipher || body;
 
+    console.log('[CIPHER /create] Raw body keys:', JSON.stringify(Object.keys(body)));
+    if (body.cipher) console.log('[CIPHER /create] Nested cipher keys:', JSON.stringify(Object.keys(body.cipher)));
+
     if (!cipherBody.type || !cipherBody.name) {
+        console.log('[CIPHER /create] FULL RAW BODY:', JSON.stringify(body).substring(0, 2000));
         throw new BadRequestError('Type and name are required.');
     }
 
