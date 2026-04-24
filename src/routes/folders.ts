@@ -65,7 +65,8 @@ foldersRoute.get('/:id', async (c) => {
 foldersRoute.post('/', async (c) => {
     const db = drizzle(c.env.DB);
     const userId = c.get('userId');
-    const body = await c.req.json<FolderRequest>();
+    const rawBody = await c.req.json<any>();
+    const body: FolderRequest = rawBody.folder || rawBody;
 
     if (!body.name) throw new BadRequestError('Name is required.');
 
@@ -97,7 +98,8 @@ foldersRoute.put('/:id', async (c) => {
     const db = drizzle(c.env.DB);
     const userId = c.get('userId');
     const folderId = c.req.param('id');
-    const body = await c.req.json<FolderRequest>();
+    const rawBody = await c.req.json<any>();
+    const body: FolderRequest = rawBody.folder || rawBody;
 
     const existing = await db.select().from(folders)
         .where(and(eq(folders.id, folderId), eq(folders.userId, userId))).get();
@@ -126,7 +128,8 @@ foldersRoute.post('/:id', async (c) => {
     const db = drizzle(c.env.DB);
     const userId = c.get('userId');
     const folderId = c.req.param('id');
-    const body = await c.req.json<FolderRequest>();
+    const rawBody = await c.req.json<any>();
+    const body: FolderRequest = rawBody.folder || rawBody;
 
     const existing = await db.select().from(folders)
         .where(and(eq(folders.id, folderId), eq(folders.userId, userId))).get();

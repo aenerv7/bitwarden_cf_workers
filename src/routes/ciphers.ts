@@ -1643,7 +1643,8 @@ ciphersRoute.post('/:id', async (c) => {
     const id = c.req.param('id');
     const db = drizzle(c.env.DB);
     const userId = c.get('userId');
-    const body = await c.req.json<CipherRequest>();
+    const rawBody = await c.req.json<any>();
+    const body: CipherRequest = rawBody.cipher || rawBody;
 
     const existing = await db.select().from(ciphers)
         .where(and(eq(ciphers.id, id), eq(ciphers.userId, userId))).get();
@@ -1826,7 +1827,8 @@ ciphersRoute.put('/:id', async (c) => {
     const db = drizzle(c.env.DB);
     const userId = c.get('userId');
     const cipherId = c.req.param('id');
-    const body = await c.req.json<CipherRequest>();
+    const rawBody = await c.req.json<any>();
+    const body: CipherRequest = rawBody.cipher || rawBody;
 
     // 同时支持个人和组织 cipher
     let existing = await db.select().from(ciphers)

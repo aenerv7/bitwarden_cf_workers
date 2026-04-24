@@ -169,7 +169,8 @@ authed.get('/:id', async (c) => {
 authed.post('/', async (c) => {
     const db = drizzle(c.env.DB);
     const userId = c.get('userId');
-    const body = await c.req.json<SendRequest>();
+    const rawBody = await c.req.json<any>();
+    const body: SendRequest = rawBody.send || rawBody;
 
     if (body.type === undefined || !body.deletionDate) {
         throw new BadRequestError('Type and deletion date are required.');
@@ -213,7 +214,8 @@ authed.put('/:id', async (c) => {
     const db = drizzle(c.env.DB);
     const userId = c.get('userId');
     const sendId = c.req.param('id');
-    const body = await c.req.json<SendRequest>();
+    const rawBody = await c.req.json<any>();
+    const body: SendRequest = rawBody.send || rawBody;
 
     const existing = await db.select().from(sends)
         .where(and(eq(sends.id, sendId), eq(sends.userId, userId))).get();
